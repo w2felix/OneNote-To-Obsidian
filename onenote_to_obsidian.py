@@ -459,7 +459,8 @@ def _convert_cdata_html(html_text: str) -> str:
         return ''
 
     if '<' not in html_text:
-        return html_mod.unescape(html_text)
+        text = html_mod.unescape(html_text)
+        return text.replace('[', r'\[').replace(']', r'\]')
 
     soup = BeautifulSoup(html_text, 'html.parser')
     result = _process_html_node(soup)
@@ -469,7 +470,7 @@ def _convert_cdata_html(html_text: str) -> str:
 def _process_html_node(node) -> str:
     """Recursively process HTML nodes to markdown."""
     if isinstance(node, str):
-        return node
+        return node.replace('[', r'\[').replace(']', r'\]')
 
     if not hasattr(node, 'children'):
         return node.get_text() if hasattr(node, 'get_text') else str(node)
