@@ -122,21 +122,21 @@ $pageIds = @(
 {page_id_list}
 )
 $count = 0
-foreach ($pid in $pageIds) {{
+foreach ($pageId in $pageIds) {{
     $count++
     try {{
         [string]$pageXml = ""
-        $onenote.GetPageContent($pid, [ref]$pageXml, 1)
+        $onenote.GetPageContent($pageId, [ref]$pageXml, 1)
         $hash = [System.BitConverter]::ToString(
             [System.Security.Cryptography.SHA256]::Create().ComputeHash(
-                [System.Text.Encoding]::UTF8.GetBytes($pid)
+                [System.Text.Encoding]::UTF8.GetBytes($pageId)
             )
         ).Replace("-","").Substring(0,16).ToLower()
         $filename = "{temp_dir_escaped}\\\\$hash.xml"
         [System.IO.File]::WriteAllText($filename, $pageXml, [System.Text.Encoding]::UTF8)
         Write-Output "PROGRESS:$count/$($pageIds.Count)"
     }} catch {{
-        Write-Output "ERROR:$pid`:$($_.Exception.Message)"
+        Write-Output "ERROR:$pageId`:$($_.Exception.Message)"
     }}
 }}
 '''
