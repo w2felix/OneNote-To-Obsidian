@@ -4,6 +4,7 @@ obsidian_export/
 # Python
 __pycache__/
 *.pyc
+CLAUDE.md
 
 # Temp files from exploration
 *.xml

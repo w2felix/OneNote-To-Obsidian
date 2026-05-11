@@ -15,7 +15,6 @@ import argparse
 import base64
 import hashlib
 import json
-import os
 import re
 import subprocess
 import sys
@@ -24,7 +23,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
-import html as html_mod
+import html
 
 from bs4 import BeautifulSoup
 
@@ -475,11 +474,10 @@ def _convert_cdata_html(html_text: str) -> str:
         return ''
 
     if '<' not in html_text:
-        return _escape_md_text(html_mod.unescape(html_text))
+        return _escape_md_text(html.unescape(html_text))
 
     soup = BeautifulSoup(html_text, 'html.parser')
-    result = _process_html_node(soup)
-    return html_mod.unescape(result)
+    return _process_html_node(soup)
 
 
 def _process_html_node(node) -> str:
@@ -538,11 +536,6 @@ def _convert_image(image_elem, ns, images: dict) -> str:
     filename = f'{content_hash}.png'
     images[filename] = image_data
 
-    alt = image_elem.get('alt', '').strip()
-    # Clean up auto-generated alt text
-    alt = re.sub(r'^Computergenerierter Alternativtext:\s*', '', alt)
-    alt = alt.split('\n')[0][:80]
-
     return f'![[{ATTACHMENTS_FOLDER}/{filename}]]'
 
 
@@ -571,6 +564,8 @@ def _convert_inserted_file(file_elem, ns, images: dict) -> str:
     filename = f'{safe_name}_{content_hash}{ext}'
 
     images[filename] = file_data
+    if ext == '.pdf':
+        return f'![[{ATTACHMENTS_FOLDER}/{filename}]]'
     return f'[[{ATTACHMENTS_FOLDER}/{filename}]]'
 
 
@@ -954,7 +949,7 @@ Write-Output "DONE"
 '''
             script_path = temp_dir / 'hierarchy_only.ps1'
             script_path.write_text(hierarchy_script, encoding='utf-8')
-            result = subprocess.run(
+            subprocess.run(
                 ['powershell', '-ExecutionPolicy', 'Bypass', '-File', str(script_path)],
                 capture_output=True, text=True, encoding='utf-8', errors='replace'
             )
