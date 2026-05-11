@@ -25,16 +25,23 @@ This creates an `obsidian_export/` folder you can open directly as an Obsidian v
 
 ## Options
 
+### Basic
+
 | Flag | What it does | Default |
 |------|-------------|---------|
 | `--output-dir PATH` | Where to write the vault | `./obsidian_export` |
-| `--notebooks "Name1" "Name2"` | Only sync specific notebooks | All notebooks |
-| `--vault-mode single\|multi` | One vault for everything, or one folder per notebook | `single` |
-| `--skip-images` | Text only (faster, much smaller output) | Images included |
-| `--dry-run` | Preview what would change without writing anything | — |
-| `--force-reexport` | Re-export pages you previously deleted from the vault | — |
-| `--force-reconvert onenote` | Re-export all pages from OneNote, overwriting local files | — |
-| `--force-reconvert obsidian` | Keep all local files as-is, reset sync state to match them | — |
+| `--notebooks "Name1" "Name2"` | Only sync specific notebooks (use exact names as they appear in OneNote) | All notebooks |
+| `--vault-mode single\|multi` | `single` = one vault containing all notebooks as top-level folders. `multi` = each notebook gets its own separate vault folder (useful if you want to open them independently in Obsidian) | `single` |
+| `--skip-images` | Skip all images and file attachments. Produces text-only Markdown — much faster and smaller | Images included |
+
+### Sync control
+
+| Flag | When to use it |
+|------|---------------|
+| `--dry-run` | You want to preview what the script *would* do without actually writing or changing anything. Good for checking before a big sync. |
+| `--force-reexport` | You previously deleted a page from the Obsidian vault (intentionally), but now want it back. Normally the script respects deletions — this flag overrides that. |
+| `--force-reconvert onenote` | You want to **overwrite all local Markdown files** with a fresh export from OneNote. Use this after a script update that improves formatting, or if your local files got corrupted. All your Obsidian edits will be lost. |
+| `--force-reconvert obsidian` | You've been editing files in Obsidian (fixing formatting, reorganizing content, etc.) and want the sync engine to **accept your current vault as the new baseline**. No files are touched — it only resets the internal tracking so that future syncs won't flag your edits as conflicts. |
 
 ### Examples
 
@@ -48,10 +55,10 @@ python onenote_to_obsidian.py --vault-mode multi
 # See what changed since last sync without touching any files
 python onenote_to_obsidian.py --dry-run
 
-# Re-export everything from OneNote (e.g. after a script update that improves conversion)
+# After a script update: re-export everything with improved conversion
 python onenote_to_obsidian.py --force-reconvert onenote
 
-# Keep your Obsidian edits and just reset the sync baseline
+# After bulk-editing in Obsidian: tell the sync "my local files are correct now"
 python onenote_to_obsidian.py --force-reconvert obsidian
 ```
 
