@@ -24,8 +24,9 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
+import html as html_mod
+
 from bs4 import BeautifulSoup
-from markdownify import markdownify as md
 
 # ============================================================================
 # Constants
@@ -121,7 +122,7 @@ foreach ($pid in $pageIds) {{
     $count++
     try {{
         [string]$pageXml = ""
-        $onenote.GetPageContent($pid, [ref]$pageXml)
+        $onenote.GetPageContent($pid, [ref]$pageXml, 1)
         $hash = [System.BitConverter]::ToString(
             [System.Security.Cryptography.SHA256]::Create().ComputeHash(
                 [System.Text.Encoding]::UTF8.GetBytes($pid)
@@ -383,7 +384,7 @@ def _convert_oe(oe_elem, ns, style_map, images, skip_images, indent) -> str | No
     # Check for table
     table = oe_elem.find('one:Table', ns)
     if table is not None:
-        return _convert_table(table, ns, style_map, images, skip_images)
+        return _convert_table(table, ns)
 
     # Check for image
     image = oe_elem.find('one:Image', ns)
@@ -427,14 +428,14 @@ def _convert_oe(oe_elem, ns, style_map, images, skip_images, indent) -> str | No
         return None  # Already in frontmatter
 
     # Handle image
-    if image is not None and not skip_images:
+    if image is not None:
+        if skip_images:
+            return f'{prefix}{text} *(image omitted)*' if text else None
         img_md = _convert_image(image, ns, images)
         if img_md:
             if text:
                 return f'{prefix}{text}\n\n{img_md}'
             return img_md
-        elif skip_images and image is not None:
-            return f'{prefix}{text} *(image omitted)*' if text else None
 
     # Skip empty lines that are just formatting artifacts
     if not text and not prefix:
@@ -447,8 +448,6 @@ def _convert_cdata_html(html_text: str) -> str:
     """Convert HTML-formatted CDATA text to markdown."""
     if not html_text or html_text.isspace():
         return ''
-
-    import html as html_mod
 
     if '<' not in html_text:
         return html_mod.unescape(html_text)
@@ -519,10 +518,10 @@ def _convert_image(image_elem, ns, images: dict) -> str:
     alt = re.sub(r'^Computergenerierter Alternativtext:\s*', '', alt)
     alt = alt.split('\n')[0][:80]
 
-    return f'![{alt}]({ATTACHMENTS_FOLDER}/{filename})'
+    return f'![[{ATTACHMENTS_FOLDER}/{filename}]]'
 
 
-def _convert_table(table_elem, ns, style_map, images, skip_images) -> str:
+def _convert_table(table_elem, ns) -> str:
     """Convert OneNote table to markdown table."""
     rows = table_elem.findall('one:Row', ns)
     if not rows:
@@ -863,6 +862,7 @@ def main():
 
     # Create temp directory for export
     temp_dir = Path(tempfile.mkdtemp(prefix='onenote_sync_'))
+    errors = []
 
     try:
         # Phase 1: Get hierarchy (always needed)
@@ -877,7 +877,7 @@ def main():
 $onenote = New-Object -ComObject OneNote.Application
 [string]$hierarchy = ""
 $onenote.GetHierarchy("", 4, [ref]$hierarchy)
-[System.IO.File]::WriteAllText("{str(temp_dir).replace(chr(92), '/')}//hierarchy.xml", $hierarchy, [System.Text.Encoding]::UTF8)
+[System.IO.File]::WriteAllText("{str(temp_dir).replace(chr(92), '/')}/hierarchy.xml", $hierarchy, [System.Text.Encoding]::UTF8)
 Write-Output "DONE"
 '''
             script_path = temp_dir / 'hierarchy_only.ps1'
