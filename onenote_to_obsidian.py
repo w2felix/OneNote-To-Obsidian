@@ -453,14 +453,24 @@ def _convert_oe(oe_elem, ns, style_map, images, skip_images, indent) -> str | No
     return f'{prefix}{text}'
 
 
+_MD_ESCAPE_RE = re.compile(r'([\\`*_\[\]~#])')
+_MD_LINE_START_RE = re.compile(r'^(#{1,6}\s|>)', re.MULTILINE)
+
+
+def _escape_md_text(text: str) -> str:
+    """Escape markdown-special characters in literal text from OneNote."""
+    text = _MD_ESCAPE_RE.sub(r'\\\1', text)
+    text = _MD_LINE_START_RE.sub(r'\\\1', text)
+    return text
+
+
 def _convert_cdata_html(html_text: str) -> str:
     """Convert HTML-formatted CDATA text to markdown."""
     if not html_text or html_text.isspace():
         return ''
 
     if '<' not in html_text:
-        text = html_mod.unescape(html_text)
-        return text.replace('[', r'\[').replace(']', r'\]')
+        return _escape_md_text(html_mod.unescape(html_text))
 
     soup = BeautifulSoup(html_text, 'html.parser')
     result = _process_html_node(soup)
@@ -470,7 +480,7 @@ def _convert_cdata_html(html_text: str) -> str:
 def _process_html_node(node) -> str:
     """Recursively process HTML nodes to markdown."""
     if isinstance(node, str):
-        return node.replace('[', r'\[').replace(']', r'\]')
+        return _escape_md_text(node)
 
     if not hasattr(node, 'children'):
         return node.get_text() if hasattr(node, 'get_text') else str(node)
