@@ -1,0 +1,9 @@
+# Output vault (generated, large, contains personal data)
+obsidian_export/
+
+# Python
+__pycache__/
+*.pyc
+
+# Temp files from exploration
+*.xml
