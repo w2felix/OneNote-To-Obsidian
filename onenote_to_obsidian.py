@@ -542,12 +542,23 @@ def _convert_image(image_elem, ns, images: dict) -> str:
 def _convert_inserted_file(file_elem, ns, images: dict) -> str:
     """Extract an embedded file and return markdown link."""
     data_elem = file_elem.find('one:Data', ns)
-    if data_elem is None or not data_elem.text:
-        return ''
+    file_data = None
 
-    try:
-        file_data = base64.b64decode(data_elem.text.strip())
-    except Exception:
+    if data_elem is not None and data_elem.text:
+        try:
+            file_data = base64.b64decode(data_elem.text.strip())
+        except Exception:
+            pass
+
+    if file_data is None:
+        cache_path = file_elem.get('pathCache', '')
+        if cache_path and Path(cache_path).exists():
+            try:
+                file_data = Path(cache_path).read_bytes()
+            except Exception:
+                pass
+
+    if file_data is None:
         return ''
 
     original_name = file_elem.get('preferredName') or file_elem.get('pathSource', '')
