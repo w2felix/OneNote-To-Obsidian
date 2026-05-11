@@ -437,6 +437,15 @@ def _convert_oe(oe_elem, ns, style_map, images, skip_images, indent) -> str | No
                 return f'{prefix}{text}\n\n{img_md}'
             return img_md
 
+    # Handle embedded file (PDF, Word, Excel, etc.)
+    inserted_file = oe_elem.find('one:InsertedFile', ns)
+    if inserted_file is not None:
+        file_md = _convert_inserted_file(inserted_file, ns, images)
+        if file_md:
+            if text:
+                return f'{prefix}{text}\n{file_md}'
+            return f'{prefix}{file_md}'
+
     # Skip empty lines that are just formatting artifacts
     if not text and not prefix:
         return ''
@@ -519,6 +528,34 @@ def _convert_image(image_elem, ns, images: dict) -> str:
     alt = alt.split('\n')[0][:80]
 
     return f'![[{ATTACHMENTS_FOLDER}/{filename}]]'
+
+
+def _convert_inserted_file(file_elem, ns, images: dict) -> str:
+    """Extract an embedded file and return markdown link."""
+    data_elem = file_elem.find('one:Data', ns)
+    if data_elem is None or not data_elem.text:
+        return ''
+
+    try:
+        file_data = base64.b64decode(data_elem.text.strip())
+    except Exception:
+        return ''
+
+    original_name = file_elem.get('preferredName') or file_elem.get('pathSource', '')
+    if original_name:
+        original_name = original_name.rsplit('\\', 1)[-1].rsplit('/', 1)[-1]
+
+    if not original_name:
+        content_hash = hashlib.md5(file_data).hexdigest()[:12]
+        original_name = f'{content_hash}.bin'
+
+    safe_name = sanitize_filename(Path(original_name).stem)
+    ext = Path(original_name).suffix.lower()
+    content_hash = hashlib.md5(file_data).hexdigest()[:8]
+    filename = f'{safe_name}_{content_hash}{ext}'
+
+    images[filename] = file_data
+    return f'[[{ATTACHMENTS_FOLDER}/{filename}]]'
 
 
 def _convert_table(table_elem, ns) -> str:
