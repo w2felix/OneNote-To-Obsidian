@@ -70,6 +70,11 @@ def parse_args():
         '--force-reexport', action='store_true',
         help='Re-export pages even if previously deleted from Obsidian'
     )
+    parser.add_argument(
+        '--force-reconvert', choices=['onenote', 'obsidian'], default=None,
+        help='Re-convert all pages. "onenote" overwrites local files with fresh export; '
+             '"obsidian" keeps local files but updates sync state to match them'
+    )
     return parser.parse_args()
 
 
@@ -698,6 +703,7 @@ def print_dry_run(actions: list[dict], state: dict):
         'conflict': ('CONFLICT (both changed)', '[C]'),
         'reexport': ('RE-EXPORT', '[R]'),
         'orphan': ('ORPHANED (deleted from OneNote)', '[O]'),
+        'keep_obsidian': ('KEEP OBSIDIAN (update state only)', '[K]'),
     }
 
     total_skip = len(state.get('pages', {})) - sum(
@@ -779,7 +785,9 @@ def execute_actions(actions: list[dict], state: dict, args, temp_dir: Path):
             full_path = out_dir / rel_path
         used_paths.add(rel_path)
 
-        if atype == 'conflict':
+        if atype == 'keep_obsidian':
+            _handle_keep_obsidian(action, state, args, full_path, rel_path)
+        elif atype == 'conflict':
             _handle_conflict(action, state, args, temp_dir, full_path, out_dir, rel_path)
         elif atype in ('new', 'update', 'reexport'):
             _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path)
@@ -788,6 +796,22 @@ def execute_actions(actions: list[dict], state: dict, args, temp_dir: Path):
                    end='', flush=True)
 
     print()
+
+
+def _handle_keep_obsidian(action, state, args, full_path, rel_path):
+    """Keep the Obsidian file as-is but update sync state to match it."""
+    page = action['page']
+    key = action['key']
+
+    state['pages'][key] = {
+        'onenote_id': page['id'],
+        'onenote_path': page['section_path'],
+        'page_name': page['name'],
+        'onenote_modified': page['modified'],
+        'active_file': rel_path,
+        'content_hash': file_hash(full_path) if full_path.exists() else '',
+        'status': 'synced',
+    }
 
 
 def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path):
@@ -951,7 +975,20 @@ Write-Output "DONE"
         # Phase 3: Determine and execute actions
         print('\n[Phase 3] Syncing...')
 
-        if is_first_run:
+        if args.force_reconvert:
+            if args.force_reconvert == 'obsidian':
+                actions = [{'type': 'keep_obsidian', 'page': p, 'key': page_key(p['id'])}
+                           for p in all_pages if page_key(p['id']) in state['pages']]
+                new_pages = [p for p in all_pages if page_key(p['id']) not in state['pages']]
+                actions += [{'type': 'new', 'page': p, 'key': page_key(p['id'])} for p in new_pages]
+            else:
+                actions = [{'type': 'update', 'page': p, 'key': page_key(p['id']),
+                            'entry': state['pages'].get(page_key(p['id']), {})}
+                           for p in all_pages if page_key(p['id']) in state['pages']]
+                new_pages = [p for p in all_pages if page_key(p['id']) not in state['pages']]
+                actions += [{'type': 'new', 'page': p, 'key': page_key(p['id'])} for p in new_pages]
+            print(f'  Force reconvert (keep={args.force_reconvert}): {len(actions)} pages')
+        elif is_first_run:
             # First run: all pages are "new"
             actions = [{'type': 'new', 'page': p, 'key': page_key(p['id'])} for p in all_pages]
         else:

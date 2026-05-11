@@ -33,6 +33,8 @@ This creates an `obsidian_export/` folder you can open directly as an Obsidian v
 | `--skip-images` | Text only (faster, much smaller output) | Images included |
 | `--dry-run` | Preview what would change without writing anything | — |
 | `--force-reexport` | Re-export pages you previously deleted from the vault | — |
+| `--force-reconvert onenote` | Re-export all pages from OneNote, overwriting local files | — |
+| `--force-reconvert obsidian` | Keep all local files as-is, reset sync state to match them | — |
 
 ### Examples
 
@@ -45,6 +47,12 @@ python onenote_to_obsidian.py --vault-mode multi
 
 # See what changed since last sync without touching any files
 python onenote_to_obsidian.py --dry-run
+
+# Re-export everything from OneNote (e.g. after a script update that improves conversion)
+python onenote_to_obsidian.py --force-reconvert onenote
+
+# Keep your Obsidian edits and just reset the sync baseline
+python onenote_to_obsidian.py --force-reconvert obsidian
 ```
 
 ## How Sync Works
