@@ -225,35 +225,21 @@ _entity_index/compounds/M1774.md → lists all pages mentioning M1774
 
 #### Ontology Setup
 
-The entity dictionaries must be built before first use. Source files go in `entity_data/`:
+The entity dictionaries must be built once before first use:
 
-| File | Source URL | Size |
-|---|---|---|
-| `hgnc_complete_set.tsv` | https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/hgnc_complete_set.txt | ~16 MB |
-| `mondo.json` | https://github.com/monarch-initiative/mondo/releases/latest/download/mondo.json | ~99 MB |
-
-Download and build:
+Run the setup script — it downloads both files and builds the lookups:
 
 ```bash
-cd entity_data/
-
-# Download HGNC gene nomenclature (updated monthly)
-curl -L -o hgnc_complete_set.tsv "https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/hgnc_complete_set.txt"
-
-# Download MONDO disease ontology (updated monthly)
-curl -L -o mondo.json "https://github.com/monarch-initiative/mondo/releases/latest/download/mondo.json"
-
-# Build lookup JSONs
-python build_dictionaries.py
+python setup_entities.py
 ```
 
-This generates:
-- `hgnc_genes.json` (~7 MB) — gene symbols, aliases, and HGNC IDs
-- `mondo_diseases.json` (~37 MB) — disease names, synonyms, MONDO IDs, and parent relationships
+This downloads ~115 MB total, then generates:
+- `entity_data/hgnc_genes.json` (~7 MB) — gene symbols, aliases, and HGNC IDs
+- `entity_data/mondo_diseases.json` (~37 MB) — disease names, synonyms, and MONDO IDs
 
-Internal compound mappings are in `internal_compounds.yaml` (manually maintained). Company name variants are in `companies.yaml` (also manually maintained) and used for organization-level entity matching.
+To update the ontologies later (they're updated monthly), re-run `setup_entities.py` — it will ask before re-downloading existing files.
 
-To update ontologies, re-download the source files and re-run `build_dictionaries.py`.
+Internal compound mappings are in `entity_data/internal_compounds.yaml` (manually maintained). Company name variants are in `entity_data/companies.yaml` (also manually maintained).
 
 ## Vault Structure
 
