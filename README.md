@@ -230,14 +230,14 @@ The entity dictionaries must be built once before first use:
 Run the setup script — it downloads both files and builds the lookups:
 
 ```bash
-python setup_entities.py
+python setup.py --skip-packages  # if already installed; or just: python setup.py
 ```
 
 This downloads ~115 MB total, then generates:
 - `entity_data/hgnc_genes.json` (~7 MB) — gene symbols, aliases, and HGNC IDs
 - `entity_data/mondo_diseases.json` (~37 MB) — disease names, synonyms, and MONDO IDs
 
-To update the ontologies later (they're updated monthly), re-run `setup_entities.py` — it will ask before re-downloading existing files.
+To update the ontologies later (updated monthly): `python setup.py --update-entities`
 
 Internal compound mappings are in `entity_data/internal_compounds.yaml` (manually maintained). Company name variants are in `entity_data/companies.yaml` (also manually maintained).
 
