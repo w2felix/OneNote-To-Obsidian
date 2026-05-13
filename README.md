@@ -21,6 +21,8 @@ pip install anthropic pymupdf pillow pdfplumber python-pptx python-docx pandas t
 
 For Vision AI / AI tags, set the `ANTHROPIC_API_KEY` environment variable (or configure your proxy in `vision_ai/client.py`).
 
+**Tesseract OCR** (optional) — needed for text extraction from screenshots. `pytesseract` (listed above) is the Python binding, but the Tesseract binary must also be installed separately. With conda: `conda install tesseract`. Without it, screenshot analysis still runs but skips OCR.
+
 ## Quick Start
 
 ```bash
@@ -50,7 +52,7 @@ This creates an `obsidian_export/` folder you can open directly as an Obsidian v
 |------|-------------|
 | `--dry-run` | Preview what would change without writing anything |
 | `--force-reexport` | Re-export pages previously deleted from the vault |
-| `--force-reconvert onenote` | Overwrite all local files with fresh OneNote export (destructive) |
+| `--force-reconvert onenote` | Overwrite all local files with fresh OneNote export — **any manual edits in Obsidian will be lost** |
 | `--force-reconvert obsidian` | Accept current vault as baseline without touching files |
 
 ### AI Features
@@ -61,6 +63,9 @@ This creates an `obsidian_export/` folder you can open directly as an Obsidian v
 | `--vision-ai-force` | Re-analyze attachments even if previously cached |
 | `--ai-tags` | Generate 3-7 semantic topic tags per page using Claude. Tags are added to YAML frontmatter |
 | `--ai-tags-force` | Re-tag pages even if content hasn't changed |
+| `--entities` | Extract biomedical entities (genes, drugs, diseases, M-codes) into frontmatter |
+| `--entities-force` | Re-extract entities even if content hasn't changed |
+| `--entity-index` | Generate `_entity_index/` hub pages with Dataview cross-reference queries |
 
 ### Examples
 
@@ -82,6 +87,12 @@ python onenote_to_obsidian.py --ai-tags
 
 # Full pipeline: sync + analyze attachments + tag pages
 python onenote_to_obsidian.py --vision-ai --ai-tags
+
+# Extract entities (fast, no API calls — local dictionary only)
+python onenote_to_obsidian.py --entities --entity-index
+
+# Full pipeline with entities (tags + entities in a single API call)
+python onenote_to_obsidian.py --ai-tags --entities --entity-index
 ```
 
 ## Features
@@ -100,7 +111,28 @@ Sync state is tracked in `.sync_state.json` inside the output folder.
 
 ### Auto-Wikilinks
 
-On every export, the script detects mentions of other page names in body text and converts them to `[[wikilinks]]`. This runs automatically (no flag needed) and respects code blocks, existing links, and frontmatter.
+On every export, the script detects mentions of other page names in body text and converts them to `[[wikilinks]]`. This runs automatically on every export (there is no flag to disable it) and respects code blocks, existing links, and frontmatter. Unresolvable `onenote://` links are preserved as plain text with a `*(unresolved OneNote link)*` annotation.
+
+### OneNote Tags and Checkboxes
+
+OneNote tags are automatically converted to Obsidian YAML tags (lowercase, hyphenated). OneNote checkboxes become `[ ]` / `[x]` Markdown task items. Both are handled transparently — no flags needed.
+
+### YAML Frontmatter
+
+Every exported page gets a YAML frontmatter block populated from OneNote metadata:
+
+| Field | Description |
+|-------|-------------|
+| `tags` | OneNote tags + AI-generated tags (if `--ai-tags`) |
+| `entities` | Extracted entities (if `--entities`) |
+| `author` | Page creator from OneNote |
+| `contributors` | Other editors from OneNote |
+| `last_modified_by` | Last editor |
+| `last_modified_at` | Last modification timestamp |
+| `parent` | Parent page name (for sub-pages) |
+| `children` | List of child page names |
+
+These fields are queryable via Obsidian's [Dataview](https://github.com/blacksmithgu/obsidian-dataview) plugin.
 
 ### Vision AI (`--vision-ai`)
 
@@ -144,11 +176,92 @@ tags:
 
 Cached by content hash in sync state — pages are only re-tagged when content changes (or with `--ai-tags-force`).
 
+### Biomedical Entity Extraction (`--entities`)
+
+Extracts and normalizes biomedical entities from page content:
+
+| Entity Type | Source | Example |
+|---|---|---|
+| Genes/Proteins | HGNC ontology (44,986 approved symbols) | EGFR, KRAS, PD-L1 |
+| Diseases | MONDO ontology (31,817 diseases + 81K synonyms) | NSCLC, melanoma, AML |
+| Internal compounds | Regex `M[0-9]{4}` + mapping YAML | M1774, M3814 |
+| Drugs | LLM-extracted (Tier 2, when combined with `--ai-tags`) | pembrolizumab, osimertinib |
+
+**Two-tier extraction:**
+- **Tier 1 (local, ~5ms/page):** Regex + dictionary matching against HGNC and MONDO. Runs with `--entities` alone, no API calls needed.
+- **Tier 2 (LLM, piggybacked):** When used with `--ai-tags`, the existing API call is extended to also return entities. Zero additional cost. Catches novel drug names not in dictionaries.
+
+> **Note:** Drug extraction (Tier 2) only runs when `--entities` and `--ai-tags` are combined. Running `--entities` alone extracts genes, diseases, and internal compounds, but not drugs.
+
+Entities are stored in YAML frontmatter:
+
+```yaml
+---
+entities:
+  genes:
+    - "EGFR"
+    - "KRAS"
+  diseases:
+    - "NSCLC"
+  compounds:
+    - "M1774"
+---
+```
+
+With `--entity-index`, hub pages are generated in `_entity_index/` containing Dataview queries:
+
+```
+_entity_index/genes/EGFR.md      → lists all pages mentioning EGFR
+_entity_index/compounds/M1774.md → lists all pages mentioning M1774
+```
+
+#### Ontology Setup
+
+The entity dictionaries must be built before first use. Source files go in `entity_data/`:
+
+| File | Source URL | Size |
+|---|---|---|
+| `hgnc_complete_set.tsv` | https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/hgnc_complete_set.txt | ~16 MB |
+| `mondo.json` | https://github.com/monarch-initiative/mondo/releases/latest/download/mondo.json | ~99 MB |
+
+Download and build:
+
+```bash
+cd entity_data/
+
+# Download HGNC gene nomenclature (updated monthly)
+curl -L -o hgnc_complete_set.tsv "https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/hgnc_complete_set.txt"
+
+# Download MONDO disease ontology (updated monthly)
+curl -L -o mondo.json "https://github.com/monarch-initiative/mondo/releases/latest/download/mondo.json"
+
+# Build lookup JSONs
+python build_dictionaries.py
+```
+
+This generates:
+- `hgnc_genes.json` (~7 MB) — gene symbols, aliases, and HGNC IDs
+- `mondo_diseases.json` (~37 MB) — disease names, synonyms, MONDO IDs, and parent relationships
+
+Internal compound mappings are in `internal_compounds.yaml` (manually maintained). Company name variants are in `companies.yaml` (also manually maintained) and used for organization-level entity matching.
+
+To update ontologies, re-download the source files and re-run `build_dictionaries.py`.
+
 ## Vault Structure
 
 ```
 obsidian_export/
   .sync_state.json
+  _entity_index/            # Generated by --entity-index
+    genes/
+      EGFR.md
+      KRAS.md
+    drugs/
+      pembrolizumab.md
+    diseases/
+      NSCLC.md
+    compounds/
+      M1774.md
   Notebook Name/
     Section/
       Page.md
@@ -170,8 +283,11 @@ obsidian_export/
 - **One-way sync** — changes in Obsidian are never pushed back to OneNote.
 - **Page moves** in OneNote are not tracked (appears as new page + orphan).
 - **Sub-pages** are exported flat with a `parent` link in frontmatter.
-- **Conflict files** are named `Page Name (OneNote conflict 2026-05-12).md`.
+- **Conflict files** are named `Page Name (OneNote conflict 2026-05-12).md`. Same-day repeats get `#2`, `#3` suffixes.
 - **Vision AI costs** — each attachment group makes 1 API call. Large vaults with many images will incur costs. Use `--notebooks` to scope runs.
+- **Auto-wikilinks cannot be disabled** — they run on every export. This is intentional but worth knowing if you want a plain export.
+- **Tesseract OCR** — if not installed, screenshot analysis runs without text extraction (silent fallback, no error).
+- **Do not run two instances on the same vault simultaneously** — `.sync_state.json` has no concurrent-write protection.
 
 ## License
 
