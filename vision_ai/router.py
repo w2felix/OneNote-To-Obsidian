@@ -118,18 +118,18 @@ def _process_group(group: AttachmentGroup, images: dict[str, bytes],
     # Run analysis
     logger.info(f"  Analyzing: {group.worker_type} ({len(group.filenames)} file(s))")
     try:
-        result = worker.analyze(group, images, ctx)
+        analysis_result = worker.analyze(group, images, ctx)
     except Exception as e:
         logger.error(f"  Worker {group.worker_type} failed: {e}")
         return None
 
-    if not result:
+    if not analysis_result:
         logger.warning(f"  Worker {group.worker_type} returned empty result")
         return None
 
-    # Write AI note
+    # Write AI note with structured YAML frontmatter
     ai_note_filename = generate_ai_note_filename(group)
-    write_ai_note(ai_notes_dir, ai_note_filename, result, group)
+    write_ai_note(ai_notes_dir, ai_note_filename, analysis_result, group)
 
     # Update cache
     update_cache(cache, cache_key, current_hash, ai_note_filename, group.worker_type)

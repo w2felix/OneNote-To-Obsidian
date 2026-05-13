@@ -12,3 +12,9 @@ _ai_notes/
 
 # Temp files from exploration
 *.xml
+
+# Entity ontology source files (large, re-downloadable)
+entity_data/hgnc_complete_set.tsv
+entity_data/mondo.json
+entity_data/hgnc_genes.json
+entity_data/mondo_diseases.json

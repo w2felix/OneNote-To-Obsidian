@@ -3,14 +3,15 @@
 import logging
 from io import BytesIO
 from pathlib import Path
+from typing import Optional
 
-from vision_ai.workers.base import VisionWorker, AttachmentGroup, PageContext
+from vision_ai.workers.base import VisionWorker, AnalysisResult, parse_structured_response, AttachmentGroup, PageContext
 from vision_ai.client import api_call_with_retry
-from vision_ai.vision_utils import pdf_to_images, encode_image, build_vision_message
+from vision_ai.vision_utils import pdf_to_images, pdf_page_count, encode_image, build_vision_message
 
 logger = logging.getLogger(__name__)
 
-PPTX_SUMMARY_PROMPT = """Based on this slide content extracted from a presentation, create a brief index card.
+PPTX_PROMPT = """Analyze this slide content extracted from a presentation.
 
 Slide content:
 {slide_text}
@@ -19,33 +20,41 @@ Context:
 - Page: {page_title}
 - Section: {section_path}
 
-Provide:
-1. **Title & Author** (if identifiable)
-2. **Topic Outline** — one line per major section/topic
-3. **Key Takeaways** (3-5 bullets)
-4. **Notable Figures/Data** mentioned
+Respond in EXACTLY this format (fill in each field):
 
-This is an INDEX CARD — not a slide-by-slide transcript."""
+TITLE: [presentation title]
+AUTHORS: [comma-separated list, or "Unknown"]
+DATE: [date if mentioned, or "Unknown"]
+KEY_POINTS:
+- [point 1]
+- [point 2]
+- [point 3]
+BODY:
+[2-3 sentence summary of what this presentation covers and its main message]"""
 
-PDF_VISION_PROMPT = """Analyze these presentation slides and create a brief index card.
+PDF_VISION_PROMPT = """Analyze these presentation slides.
 
 Context:
 - Page: {page_title}
 - Section: {section_path}
 
-Provide:
-1. **Title & Author** (if visible)
-2. **Topic Outline** — one line per major topic covered
-3. **Key Takeaways** (3-5 bullets)
-4. **Notable Figures** — describe key charts/data shown
+Respond in EXACTLY this format (fill in each field):
 
-This is an INDEX CARD for quick reference — not a full transcript."""
+TITLE: [presentation title visible on slides]
+AUTHORS: [comma-separated list, or "Unknown"]
+DATE: [date if visible, or "Unknown"]
+KEY_POINTS:
+- [key finding/message 1]
+- [key finding/message 2]
+- [key finding/message 3]
+BODY:
+[2-3 sentence summary of what these slides cover and the main takeaway]"""
 
 
 class PresentationWorker(VisionWorker):
 
     def analyze(self, group: AttachmentGroup, images: dict[str, bytes],
-                page_context: PageContext) -> str:
+                page_context: PageContext) -> Optional[AnalysisResult]:
         filename = group.filenames[0]
         data = images[filename]
         ext = Path(filename).suffix.lower()
@@ -55,16 +64,17 @@ class PresentationWorker(VisionWorker):
         else:
             return self._analyze_pdf_presentation(data, filename, page_context)
 
-    def _analyze_pptx(self, data: bytes, filename: str, ctx: PageContext) -> str:
+    def _analyze_pptx(self, data: bytes, filename: str, ctx: PageContext) -> Optional[AnalysisResult]:
         text = self._extract_pptx_text(data)
         if not text:
-            return ""
+            return None
 
+        slide_count = text.count('--- Slide ')
         truncated = text[:12000]
         if len(text) > 12000:
             truncated += "\n[... truncated]"
 
-        prompt = PPTX_SUMMARY_PROMPT.format(
+        prompt = PPTX_PROMPT.format(
             slide_text=truncated,
             page_title=ctx.page_title,
             section_path=ctx.section_path,
@@ -72,11 +82,13 @@ class PresentationWorker(VisionWorker):
 
         messages = [{"role": "user", "content": prompt}]
         try:
-            result = api_call_with_retry(messages, max_tokens=2048)
-            return f"# Presentation Summary\n\n{result}"
+            response = api_call_with_retry(messages, max_tokens=2048)
+            result = parse_structured_response(response, default_content_type='presentation')
+            result.extra['slide_count'] = slide_count
+            return result
         except Exception as e:
             logger.error(f"API call failed for presentation {filename}: {e}")
-            return ""
+            return None
 
     def _extract_pptx_text(self, data: bytes) -> str:
         try:
@@ -98,38 +110,45 @@ class PresentationWorker(VisionWorker):
             logger.warning(f"python-pptx extraction failed: {e}")
             return ""
 
-    def _analyze_pdf_presentation(self, data: bytes, filename: str, ctx: PageContext) -> str:
+    def _analyze_pdf_presentation(self, data: bytes, filename: str,
+                                  ctx: PageContext) -> Optional[AnalysisResult]:
         try:
-            pil_images = pdf_to_images(data, dpi=150)
+            total = pdf_page_count(data)
         except Exception as e:
-            logger.error(f"Failed to render PDF {filename}: {e}")
-            return ""
+            logger.error(f"Failed to read PDF {filename}: {e}")
+            return None
 
-        if not pil_images:
-            return ""
+        if total == 0:
+            return None
 
-        # Sample slides: first, middle, last + a few others (max 8)
-        total = len(pil_images)
         if total <= 8:
             sample_indices = list(range(total))
         else:
             step = total / 8
             sample_indices = [int(i * step) for i in range(8)]
 
-        encoded = []
-        for idx in sample_indices:
-            encoded.append(encode_image(pil_images[idx], max_dim=1568))
+        try:
+            pil_images = pdf_to_images(data, dpi=150, page_indices=sample_indices)
+        except Exception as e:
+            logger.error(f"Failed to render PDF {filename}: {e}")
+            return None
 
-        prompt = PDF_VISION_PROMPT.format(
+        encoded = []
+        for img in pil_images:
+            encoded.append(encode_image(img, max_dim=1568))
+
+        prompt = f"These are {len(encoded)} sampled slides from a {total}-slide presentation.\n\n"
+        prompt += PDF_VISION_PROMPT.format(
             page_title=ctx.page_title,
             section_path=ctx.section_path,
         )
-        prompt = f"These are {len(encoded)} sampled slides from a {total}-slide presentation.\n\n" + prompt
 
         messages = build_vision_message(encoded, prompt)
         try:
-            result = api_call_with_retry(messages, max_tokens=2048)
-            return f"# Presentation Summary ({total} slides)\n\n{result}"
+            response = api_call_with_retry(messages, max_tokens=2048)
+            result = parse_structured_response(response, default_content_type='presentation')
+            result.extra['slide_count'] = total
+            return result
         except Exception as e:
             logger.error(f"Vision API failed for {filename}: {e}")
-            return ""
+            return None

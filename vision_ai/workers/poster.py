@@ -1,8 +1,9 @@
 """Poster worker: scientific poster PDF analysis with Vision AI."""
 
 import logging
+from typing import Optional
 
-from vision_ai.workers.base import VisionWorker, AttachmentGroup, PageContext
+from vision_ai.workers.base import VisionWorker, AnalysisResult, parse_structured_response, AttachmentGroup, PageContext
 from vision_ai.client import api_call_with_retry
 from vision_ai.vision_utils import pdf_to_images, encode_image, build_vision_message
 from vision_ai.ocr_utils import ocr_image
@@ -11,49 +12,47 @@ logger = logging.getLogger(__name__)
 
 POSTER_DPI = 300
 
-PROMPT_TEMPLATE = """Analyze this scientific poster and create a structured index card.
+PROMPT_TEMPLATE = """Analyze this scientific poster.
 
 Context:
 - Page: {page_title}
 - Section: {section_path}
 {ocr_context}
 
-Extract the following (keep each section concise):
+Respond in EXACTLY this format (fill in each field):
 
-1. **Title** — exact title of the poster
-2. **Authors & Affiliations** — names and institutions
-3. **Key Findings** (3-5 bullet points) — the main results/conclusions
-4. **Figures** — for each figure/chart: one line describing what it shows and the key takeaway
-5. **Methods** (1-2 sentences) — brief approach used
-6. **Conclusions** (1-2 sentences)
-
-This is an INDEX CARD for search and skimming — not a full transcription.
-Focus on findings and data, not background."""
+TITLE: [exact title of the poster]
+AUTHORS: [comma-separated names with affiliations in parentheses, or "Unknown"]
+DATE: [year/date if visible, or "Unknown"]
+KEY_POINTS:
+- [main finding/result 1]
+- [main finding/result 2]
+- [main finding/result 3]
+METHODS: [1-2 sentence methods summary]
+BODY:
+[Brief description of figures/charts shown and their key takeaways. Focus on data and conclusions.]"""
 
 
 class PosterWorker(VisionWorker):
 
     def analyze(self, group: AttachmentGroup, images: dict[str, bytes],
-                page_context: PageContext) -> str:
+                page_context: PageContext) -> Optional[AnalysisResult]:
         filename = group.filenames[0]
         data = images[filename]
 
-        # Render poster at high DPI
         try:
-            pil_images = pdf_to_images(data, dpi=POSTER_DPI)
+            pil_images = pdf_to_images(data, dpi=POSTER_DPI, max_pages=3)
         except Exception as e:
             logger.error(f"Failed to render poster {filename}: {e}")
-            return ""
+            return None
 
         if not pil_images:
-            return ""
+            return None
 
-        # Encode all pages (posters can be 1-2 pages)
         encoded = []
         for img in pil_images[:3]:
             encoded.append(encode_image(img, max_dim=2048))
 
-        # OCR pre-pass for RAG context
         ocr_texts = []
         for img in pil_images[:2]:
             ocr = ocr_image(img)
@@ -74,8 +73,8 @@ class PosterWorker(VisionWorker):
         messages = build_vision_message(encoded, prompt)
 
         try:
-            result = api_call_with_retry(messages, max_tokens=3072)
-            return f"# Poster Analysis\n\n{result}"
+            response = api_call_with_retry(messages, max_tokens=3072)
+            return parse_structured_response(response, default_content_type='poster')
         except Exception as e:
             logger.error(f"Vision API failed for poster {filename}: {e}")
-            return ""
+            return None

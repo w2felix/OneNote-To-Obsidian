@@ -19,7 +19,12 @@ import re
 import subprocess
 import sys
 import tempfile
-import defusedxml.ElementTree as ET
+try:
+    import defusedxml.ElementTree as ET
+except ImportError:
+    print("ERROR: 'defusedxml' is required for safe XML parsing.")
+    print("Install with: pip install defusedxml")
+    sys.exit(1)
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -91,6 +96,18 @@ def parse_args():
         '--ai-tags-force', action='store_true',
         help='Re-tag pages even if content has not changed since last tagging'
     )
+    parser.add_argument(
+        '--entities', action='store_true',
+        help='Extract biomedical entities (genes, drugs, diseases, compounds) and add to frontmatter'
+    )
+    parser.add_argument(
+        '--entities-force', action='store_true',
+        help='Re-extract entities even if content has not changed'
+    )
+    parser.add_argument(
+        '--entity-index', action='store_true',
+        help='Generate entity index pages in _entity_index/ for cross-referencing in Obsidian'
+    )
     return parser.parse_args()
 
 
@@ -128,6 +145,36 @@ def file_hash(filepath: Path) -> str:
 # PowerShell COM Export
 # ============================================================================
 
+# OneNote page IDs are opaque strings containing GUIDs, braces, paths, and hex.
+# Only these characters should ever appear in a valid page ID.
+_SAFE_PAGE_ID_CHARS = set(
+    'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    '0123456789-{}/ ._:'
+)
+
+
+def _validate_page_id(page_id: str) -> str:
+    """Validate that a page ID contains only safe characters for PowerShell embedding.
+
+    Raises ValueError if the ID contains unexpected characters that could
+    enable command injection.
+    """
+    if not page_id or len(page_id) > 500:
+        raise ValueError(f"Invalid page ID length: {len(page_id) if page_id else 0}")
+    unsafe = set(page_id) - _SAFE_PAGE_ID_CHARS
+    if unsafe:
+        raise ValueError(
+            f"Page ID contains unsafe characters: {unsafe!r} in '{page_id[:50]}...'"
+        )
+    # Block PowerShell metacharacters that could escape the double-quoted string
+    for dangerous in ('$(', '`', '"', '\n', '\r', ';', '&', '|'):
+        if dangerous in page_id:
+            raise ValueError(
+                f"Page ID contains PowerShell metacharacter: {dangerous!r}"
+            )
+    return page_id
+
+
 def generate_export_script(temp_dir: Path, page_ids: list[str] | None = None) -> str:
     """Generate a PowerShell script that exports hierarchy and page content."""
     # Use single-quoted string in PowerShell (no variable/subexpression expansion)
@@ -135,7 +182,8 @@ def generate_export_script(temp_dir: Path, page_ids: list[str] | None = None) ->
     temp_dir_escaped = str(temp_dir).replace('\\', '\\\\')
 
     if page_ids:
-        page_id_list = '\n'.join(f'    "{pid}"' for pid in page_ids)
+        validated_ids = [_validate_page_id(pid) for pid in page_ids]
+        page_id_list = '\n'.join(f'    "{pid}"' for pid in validated_ids)
         page_export_block = f'''
 $pageIds = @(
 {page_id_list}
@@ -209,6 +257,15 @@ def safe_print(text, **kwargs):
         print(text.encode('ascii', errors='replace').decode('ascii'), **kwargs)
 
 
+def _sanitize_error_output(text: str) -> str:
+    """Redact sensitive paths from error messages to prevent information disclosure."""
+    text = re.sub(r'[A-Za-z]:\\Users\\[^\\]+', r'C:\\Users\\<USER>', text)
+    text = re.sub(r'OneDrive - [^\\]+', 'OneDrive', text)
+    text = re.sub(r'\\\\[^\\]+\\[^\\]+', r'\\\\<SERVER>\\<SHARE>', text)
+    text = re.sub(r'AppData\\Local\\Temp\\[^\\]+', r'AppData\\Local\\Temp\\<SESSION>', text)
+    return text
+
+
 def run_powershell_export(temp_dir: Path, page_ids: list[str] | None = None) -> list[str]:
     """Run PowerShell export script, return list of errors."""
     script = generate_export_script(temp_dir, page_ids)
@@ -238,8 +295,7 @@ def run_powershell_export(temp_dir: Path, page_ids: list[str] | None = None) -> 
     process.wait()
     if process.returncode != 0:
         stderr = process.stderr.read()
-        # Redact user paths from error output
-        stderr_safe = re.sub(r'[A-Za-z]:\\Users\\[^\\]+', r'C:\\Users\\<USER>', stderr)
+        stderr_safe = _sanitize_error_output(stderr)
         safe_print(f'  PowerShell warnings: {stderr_safe[:200]}', file=sys.stderr)
 
     return errors
@@ -901,10 +957,13 @@ def _split_frontmatter(markdown: str) -> tuple[str, str]:
     return markdown[:end_idx], markdown[end_idx:]
 
 
+_MAX_WIKIFY_LENGTH = 200_000  # Skip wikification for pages over 200KB to prevent regex DoS
+
+
 def _auto_wikify(markdown: str, all_page_names: set[str], current_page_name: str) -> str:
     """Replace mentions of other page names with [[wikilinks]] in body text."""
     frontmatter, body = _split_frontmatter(markdown)
-    if not body.strip():
+    if not body.strip() or len(body) > _MAX_WIKIFY_LENGTH:
         return markdown
 
     # Sort names longest-first to avoid partial matches
@@ -1002,6 +1061,55 @@ def _inject_ai_tags(markdown: str, ai_tags: list[str]) -> str:
         tag_lines = ['tags:'] + [f'  - "{tag}"' for tag in sorted(existing_tags | set(new_tags))]
         for tl in reversed(tag_lines):
             lines.insert(closing_idx, tl)
+
+    new_frontmatter = '\n'.join(lines)
+    return new_frontmatter + body
+
+
+def _inject_entities(markdown: str, entities_dict: dict) -> str:
+    """Inject extracted entities into YAML frontmatter."""
+    if not entities_dict:
+        return markdown
+
+    frontmatter, body = _split_frontmatter(markdown)
+    if not frontmatter:
+        return markdown
+
+    lines = frontmatter.split('\n')
+
+    # Remove existing entities section if present
+    entities_start = None
+    entities_end = None
+    for i, line in enumerate(lines):
+        if line.strip() == 'entities:':
+            entities_start = i
+        elif entities_start is not None:
+            # Blank lines or indented lines are part of the entities block
+            if line.strip() == '' or line.startswith('  ') or line.startswith('\t'):
+                entities_end = i
+            else:
+                break
+
+    if entities_start is not None:
+        end = (entities_end + 1) if entities_end is not None else (entities_start + 1)
+        lines = lines[:entities_start] + lines[end:]
+
+    # Insert entities before the closing ---
+    closing_idx = len(lines) - 1
+    while closing_idx > 0 and lines[closing_idx].strip() != '---':
+        closing_idx -= 1
+
+    entity_lines = ['entities:']
+    for entity_type in ('genes', 'drugs', 'diseases', 'compounds', 'companies'):
+        items = entities_dict.get(entity_type, [])
+        if items:
+            entity_lines.append(f'  {entity_type}:')
+            for item in sorted(set(items)):
+                entity_lines.append(f'    - "{item}"')
+
+    if len(entity_lines) > 1:
+        for el in reversed(entity_lines):
+            lines.insert(closing_idx, el)
 
     new_frontmatter = '\n'.join(lines)
     return new_frontmatter + body
@@ -1247,25 +1355,128 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
 
     markdown, images = convert_page_xml(xml_path, page, args.skip_images, page_id_map)
 
-    # AI semantic tags (before wikilinks so tags don't get wikified)
-    if args.ai_tags and not args.dry_run:
+    # AI semantic tags + entity extraction
+    if (args.ai_tags or args.entities) and not args.dry_run:
         try:
-            from vision_ai.tagger import generate_tags
-            ai_tags = generate_tags(
-                markdown_body=markdown,
-                page_title=page['name'],
-                section_path=page.get('section_path', ''),
-                existing_tags=[],
-                state=state,
-                page_key=key,
-                force=args.ai_tags_force,
-            )
-            if ai_tags:
-                markdown = _inject_ai_tags(markdown, ai_tags)
+            if args.ai_tags and args.entities:
+                # Combined: single API call returns both tags and entities
+                from vision_ai.entities.llm_extractor import extract_tags_and_entities
+                from vision_ai.entities.extractor import extract_entities, EntityResult, EntityMention
+                from vision_ai.entities.dictionaries import load_dictionaries
+                from vision_ai.tagger import _strip_frontmatter, _content_hash, MIN_WORD_COUNT
+
+                body = _strip_frontmatter(markdown)
+                content_hash = _content_hash(body)
+
+                # Check cache
+                if 'ai_entities' not in state:
+                    state['ai_entities'] = {}
+                cached = state['ai_entities'].get(key)
+                force = args.ai_tags_force or args.entities_force
+
+                if cached and not force and cached.get('hash') == content_hash:
+                    ai_tags = cached.get('tags', [])
+                    entities_dict = cached.get('entities', {})
+                else:
+                    word_count = len(body.split())
+                    if word_count >= MIN_WORD_COUNT:
+                        # Tier 1: local dictionary extraction
+                        dicts = load_dictionaries()
+                        tier1_result = extract_entities(body, dicts)
+
+                        # Tier 2: LLM co-extraction
+                        ai_tags, llm_entities = extract_tags_and_entities(
+                            body, page['name'], page.get('section_path', ''))
+
+                        # Merge: Tier 1 takes precedence, LLM adds net-new
+                        tier2_result = EntityResult()
+                        for gene in llm_entities.get('genes', []):
+                            tier2_result.genes.append(EntityMention(
+                                text=gene, canonical=gene, entity_type='gene'))
+                        for drug in llm_entities.get('drugs', []):
+                            tier2_result.drugs.append(EntityMention(
+                                text=drug, canonical=drug, entity_type='drug'))
+                        for disease in llm_entities.get('diseases', []):
+                            tier2_result.diseases.append(EntityMention(
+                                text=disease, canonical=disease, entity_type='disease'))
+                        for compound in llm_entities.get('compounds', []):
+                            tier2_result.compounds.append(EntityMention(
+                                text=compound, canonical=compound, entity_type='compound'))
+                        for company in llm_entities.get('companies', []):
+                            tier2_result.companies.append(EntityMention(
+                                text=company, canonical=company, entity_type='company'))
+
+                        tier1_result.merge(tier2_result)
+                        entities_dict = tier1_result.to_dict()
+                    else:
+                        ai_tags = []
+                        entities_dict = {}
+
+                    # Cache both
+                    state['ai_entities'][key] = {
+                        'hash': content_hash,
+                        'tags': ai_tags,
+                        'entities': entities_dict,
+                    }
+                    # Also update ai_tags cache for compatibility
+                    if 'ai_tags' not in state:
+                        state['ai_tags'] = {}
+                    state['ai_tags'][key] = {'hash': content_hash, 'tags': ai_tags}
+
+                if ai_tags:
+                    markdown = _inject_ai_tags(markdown, ai_tags)
+                if entities_dict:
+                    markdown = _inject_entities(markdown, entities_dict)
+
+            elif args.ai_tags:
+                from vision_ai.tagger import generate_tags
+                ai_tags = generate_tags(
+                    markdown_body=markdown,
+                    page_title=page['name'],
+                    section_path=page.get('section_path', ''),
+                    existing_tags=[],
+                    state=state,
+                    page_key=key,
+                    force=args.ai_tags_force,
+                )
+                if ai_tags:
+                    markdown = _inject_ai_tags(markdown, ai_tags)
+
+            elif args.entities:
+                # Tier 1 only (no API call) — fast local extraction
+                from vision_ai.entities.extractor import extract_entities
+                from vision_ai.entities.dictionaries import load_dictionaries
+                from vision_ai.tagger import _strip_frontmatter, _content_hash, MIN_WORD_COUNT
+
+                body = _strip_frontmatter(markdown)
+                content_hash = _content_hash(body)
+
+                if 'ai_entities' not in state:
+                    state['ai_entities'] = {}
+                cached = state['ai_entities'].get(key)
+
+                if cached and not args.entities_force and cached.get('hash') == content_hash:
+                    entities_dict = cached.get('entities', {})
+                else:
+                    word_count = len(body.split())
+                    if word_count >= MIN_WORD_COUNT:
+                        dicts = load_dictionaries()
+                        result = extract_entities(body, dicts)
+                        entities_dict = result.to_dict()
+                    else:
+                        entities_dict = {}
+                    state['ai_entities'][key] = {
+                        'hash': content_hash,
+                        'entities': entities_dict,
+                    }
+
+                if entities_dict:
+                    markdown = _inject_entities(markdown, entities_dict)
+
         except ImportError as e:
-            print(f'\n  [!] AI tags dependencies not available: {e}')
+            print(f'\n  [!] Entity/tag dependencies not available: {e}')
         except Exception as e:
-            print(f'\n  [!] AI tags failed for {page["name"]}: {e}')
+            print(f'\n  [!] Entity extraction/tagging failed for {page["name"]}: {e}')
 
     # Auto-wikilinks
     if all_page_names:
@@ -1484,6 +1695,17 @@ Write-Output "DONE"
         else:
             execute_actions(actions, state, args, temp_dir, page_id_map, all_page_names)
             save_sync_state(state, args.output_dir)
+
+            # Entity index generation (after all pages processed)
+            if args.entity_index and not args.dry_run:
+                try:
+                    from vision_ai.entities.index_generator import generate_entity_index
+                    print('\n[Post-sync] Generating entity index...')
+                    generate_entity_index(args.output_dir, state)
+                except ImportError as e:
+                    print(f'\n  [!] Entity index dependencies not available: {e}')
+                except Exception as e:
+                    print(f'\n  [!] Entity index generation failed: {e}')
 
             # Summary
             by_type = {}

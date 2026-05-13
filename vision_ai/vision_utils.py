@@ -10,8 +10,14 @@ MAX_IMAGE_DIMENSION = 2048
 JPEG_QUALITY = 85
 
 
-def pdf_to_images(pdf_bytes: bytes, dpi: int = 150) -> list:
-    """Render PDF pages to PIL Images at given DPI."""
+def pdf_to_images(pdf_bytes: bytes, dpi: int = 150, max_pages: int = 50,
+                   page_indices: list[int] | None = None) -> list:
+    """Render PDF pages to PIL Images at given DPI.
+
+    Args:
+        page_indices: If provided, render only these specific page indices.
+        max_pages: Safety cap when page_indices is not specified.
+    """
     import fitz
     from PIL import Image
 
@@ -20,10 +26,17 @@ def pdf_to_images(pdf_bytes: bytes, dpi: int = 150) -> list:
     zoom = dpi / 72.0
     matrix = fitz.Matrix(zoom, zoom)
 
-    for page in doc:
-        pix = page.get_pixmap(matrix=matrix)
-        img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-        images.append(img)
+    if page_indices is not None:
+        for idx in page_indices:
+            if 0 <= idx < len(doc):
+                pix = doc[idx].get_pixmap(matrix=matrix)
+                img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                images.append(img)
+    else:
+        for page in doc[:max_pages]:
+            pix = page.get_pixmap(matrix=matrix)
+            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            images.append(img)
 
     doc.close()
     return images

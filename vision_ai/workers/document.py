@@ -2,8 +2,9 @@
 
 import logging
 from pathlib import Path
+from typing import Optional
 
-from vision_ai.workers.base import VisionWorker, AttachmentGroup, PageContext
+from vision_ai.workers.base import VisionWorker, AnalysisResult, parse_structured_response, AttachmentGroup, PageContext
 from vision_ai.client import api_call_with_retry
 from vision_ai.vision_utils import pdf_to_images, encode_image, build_vision_message
 
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 MAX_TEXT_CHARS = 15000
 
-PROMPT_TEMPLATE = """Analyze this document and create a structural index card for a knowledge base.
+PROMPT_TEMPLATE = """Analyze this document and create a structured index card.
 
 Context:
 - Page: {page_title}
@@ -20,39 +21,43 @@ Context:
 Extracted text (first pages):
 {extracted_text}
 
-Provide:
-1. **Document Type** (contract, report, paper, memo, etc.)
-2. **Title/Subject**
-3. **Parties/Authors** (who is involved)
-4. **Date** (execution date, publication date)
-5. **Structure** — list main sections/articles with one-line descriptions
-6. **Key Terms** (3-5 bullets) — the most important provisions, findings, or conclusions
-7. **Key Dates/Deadlines** if applicable
+Respond in EXACTLY this format (fill in each field):
 
-This is a TABLE OF CONTENTS + KEY METADATA card — NOT a full extraction.
-Enable a reader (or AI) to quickly find specific information within the original document."""
+TITLE: [document title/subject]
+CONTENT_TYPE: [contract, report, paper, memo, protocol, manuscript, etc.]
+AUTHORS: [comma-separated, or "Unknown"]
+DATE: [publication/execution date, or "Unknown"]
+KEY_POINTS:
+- [most important provision/finding/conclusion 1]
+- [key point 2]
+- [key point 3]
+BODY:
+[Brief structural overview: main sections and what each covers. Enable a reader to quickly find specific information within the original document.]"""
 
 
 FALLBACK_VISION_PROMPT = """Analyze this document page and extract its structure.
 
-Provide:
-1. Document type and title
-2. Key parties or authors
-3. Main sections visible
-4. Any key dates, terms, or obligations visible
+Respond in EXACTLY this format:
 
-Keep it concise — this is an index card."""
+TITLE: [document title]
+CONTENT_TYPE: [document type]
+AUTHORS: [if visible, or "Unknown"]
+DATE: [if visible, or "Unknown"]
+KEY_POINTS:
+- [key point 1]
+- [key point 2]
+BODY:
+[Main sections visible and key information]"""
 
 
 class DocumentWorker(VisionWorker):
 
     def analyze(self, group: AttachmentGroup, images: dict[str, bytes],
-                page_context: PageContext) -> str:
+                page_context: PageContext) -> Optional[AnalysisResult]:
         filename = group.filenames[0]
         data = images[filename]
         ext = Path(filename).suffix.lower()
 
-        # Try text extraction first
         text = self._extract_text(data, ext)
 
         if text and len(text) > 100:
@@ -60,9 +65,8 @@ class DocumentWorker(VisionWorker):
         elif ext == '.pdf':
             return self._analyze_with_vision(data, filename, page_context)
         else:
-            # Non-PDF with no extractable text — nothing to analyze
             logger.warning(f"No text extracted from {filename}, skipping")
-            return ""
+            return None
 
     def _extract_text(self, data: bytes, ext: str) -> str:
         if ext == '.pdf':
@@ -111,7 +115,8 @@ class DocumentWorker(VisionWorker):
             logger.debug(f"HTML extraction failed: {e}")
             return ""
 
-    def _analyze_with_text(self, text: str, filename: str, ctx: PageContext) -> str:
+    def _analyze_with_text(self, text: str, filename: str,
+                           ctx: PageContext) -> Optional[AnalysisResult]:
         truncated = text[:MAX_TEXT_CHARS]
         if len(text) > MAX_TEXT_CHARS:
             truncated += "\n[... truncated]"
@@ -124,28 +129,28 @@ class DocumentWorker(VisionWorker):
 
         messages = [{"role": "user", "content": prompt}]
         try:
-            result = api_call_with_retry(messages, max_tokens=2048)
-            return f"# Document Summary\n\n{result}"
+            response = api_call_with_retry(messages, max_tokens=2048)
+            return parse_structured_response(response)
         except Exception as e:
             logger.error(f"API call failed for document {filename}: {e}")
-            return ""
+            return None
 
-    def _analyze_with_vision(self, pdf_bytes: bytes, filename: str, ctx: PageContext) -> str:
+    def _analyze_with_vision(self, pdf_bytes: bytes, filename: str,
+                             ctx: PageContext) -> Optional[AnalysisResult]:
         """Fallback: use Vision AI on first few pages."""
         try:
-            pil_images = pdf_to_images(pdf_bytes, dpi=150)
+            pil_images = pdf_to_images(pdf_bytes, dpi=150, max_pages=3)
         except Exception:
-            return ""
+            return None
 
-        # Send first 3 pages
         encoded = [encode_image(img, max_dim=1568) for img in pil_images[:3]]
         if not encoded:
-            return ""
+            return None
 
         messages = build_vision_message(encoded, FALLBACK_VISION_PROMPT)
         try:
-            result = api_call_with_retry(messages, max_tokens=2048)
-            return f"# Document Summary\n\n{result}"
+            response = api_call_with_retry(messages, max_tokens=2048)
+            return parse_structured_response(response)
         except Exception as e:
             logger.error(f"Vision fallback failed for {filename}: {e}")
-            return ""
+            return None
