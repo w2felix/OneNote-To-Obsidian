@@ -166,7 +166,6 @@ def verify():
         ('Core', 'import defusedxml, bs4; print("  Core packages OK")'),
         ('AI', 'import anthropic, fitz, PIL, pdfplumber, pptx, docx; print("  AI packages OK")'),
         ('Data', 'import pandas, openpyxl, tabulate, yaml; print("  Data packages OK")'),
-        ('OCR', 'import pytesseract; print("  pytesseract OK")'),
     ]
     for name, code in checks:
         result = subprocess.run(
@@ -178,11 +177,27 @@ def verify():
         else:
             print(f'  [!] {name} packages: some missing — {result.stderr.strip()[:120]}')
 
-    result = subprocess.run(['tesseract', '--version'], capture_output=True, text=True)
+    # Functional Tesseract test: actually run OCR on a tiny in-memory image
+    ocr_test = (
+        'from PIL import Image, ImageDraw; import pytesseract; '
+        'img = Image.new("RGB", (200, 50), color="white"); '
+        'ImageDraw.Draw(img).text((10, 10), "OCR test", fill="black"); '
+        'pytesseract.image_to_string(img); '
+        'print("  Tesseract OCR: working")'
+    )
+    result = subprocess.run([sys.executable, '-c', ocr_test], capture_output=True, text=True)
     if result.returncode == 0:
-        print(f'  Tesseract: {result.stdout.splitlines()[0]}')
+        print(result.stdout.strip())
     else:
-        print('  [!] Tesseract binary not found in PATH (OCR will be skipped)')
+        # Check whether the binary exists at all to give a better error
+        ver = subprocess.run(['tesseract', '--version'], capture_output=True, text=True)
+        if ver.returncode == 0:
+            print(f'  [!] Tesseract installed ({ver.stdout.splitlines()[0].strip()}) '
+                  f'but OCR test failed:')
+            print(f'      {result.stderr.strip()[:200]}')
+        else:
+            print('  [!] Tesseract not found — OCR will be skipped (screenshot text extraction disabled)')
+            print('      To install: conda install -c conda-forge tesseract pytesseract')
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
