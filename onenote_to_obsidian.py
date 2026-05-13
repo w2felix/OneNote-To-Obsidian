@@ -97,16 +97,16 @@ def parse_args():
         help='Re-tag pages even if content has not changed since last tagging'
     )
     parser.add_argument(
-        '--entities', action='store_true',
-        help='Extract biomedical entities (genes, drugs, diseases, compounds) and add to frontmatter'
+        '--no-entities', action='store_true',
+        help='Skip biomedical entity extraction (runs by default when dictionaries are built)'
     )
     parser.add_argument(
         '--entities-force', action='store_true',
         help='Re-extract entities even if content has not changed'
     )
     parser.add_argument(
-        '--entity-index', action='store_true',
-        help='Generate entity index pages in _entity_index/ for cross-referencing in Obsidian'
+        '--no-entity-index', action='store_true',
+        help='Skip entity index generation'
     )
     return parser.parse_args()
 
@@ -1356,13 +1356,14 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
     markdown, images = convert_page_xml(xml_path, page, args.skip_images, page_id_map)
 
     # AI semantic tags + entity extraction
-    if (args.ai_tags or args.entities) and not args.dry_run:
+    run_entities = not args.no_entities
+    if (args.ai_tags or run_entities) and not args.dry_run:
         try:
-            if args.ai_tags and args.entities:
+            if args.ai_tags and run_entities:
                 # Combined: single API call returns both tags and entities
-                from vision_ai.entities.llm_extractor import extract_tags_and_entities
-                from vision_ai.entities.extractor import extract_entities, EntityResult, EntityMention
-                from vision_ai.entities.dictionaries import load_dictionaries
+                from entities.llm_extractor import extract_tags_and_entities
+                from entities.extractor import extract_entities, EntityResult, EntityMention
+                from entities.dictionaries import load_dictionaries
                 from vision_ai.tagger import _strip_frontmatter, _content_hash, MIN_WORD_COUNT
 
                 body = _strip_frontmatter(markdown)
@@ -1442,10 +1443,10 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
                 if ai_tags:
                     markdown = _inject_ai_tags(markdown, ai_tags)
 
-            elif args.entities:
+            elif run_entities:
                 # Tier 1 only (no API call) — fast local extraction
-                from vision_ai.entities.extractor import extract_entities
-                from vision_ai.entities.dictionaries import load_dictionaries
+                from entities.extractor import extract_entities
+                from entities.dictionaries import load_dictionaries
                 from vision_ai.tagger import _strip_frontmatter, _content_hash, MIN_WORD_COUNT
 
                 body = _strip_frontmatter(markdown)
@@ -1611,6 +1612,22 @@ def main():
     print('  OneNote to Obsidian Sync')
     print('=' * 60)
 
+    # Entity extraction is on by default — warn and disable if dictionaries not built
+    if not args.no_entities:
+        try:
+            from entities.dictionaries import dictionaries_available
+            if not dictionaries_available():
+                print(
+                    '\n  [!] Entity dictionaries not found — skipping entity extraction.'
+                    '\n      To enable: download ontology files and run entity_data/build_dictionaries.py'
+                    '\n      (See README: Biomedical Entity Extraction)'
+                )
+                args.no_entities = True
+                args.no_entity_index = True
+        except ImportError:
+            args.no_entities = True
+            args.no_entity_index = True
+
     # Load existing sync state
     args.output_dir.mkdir(parents=True, exist_ok=True)
     state = load_sync_state(args.output_dir)
@@ -1697,9 +1714,9 @@ Write-Output "DONE"
             save_sync_state(state, args.output_dir)
 
             # Entity index generation (after all pages processed)
-            if args.entity_index and not args.dry_run:
+            if not args.no_entity_index and not args.dry_run:
                 try:
-                    from vision_ai.entities.index_generator import generate_entity_index
+                    from entities.index_generator import generate_entity_index
                     print('\n[Post-sync] Generating entity index...')
                     generate_entity_index(args.output_dir, state)
                 except ImportError as e:

@@ -4,7 +4,7 @@ import re
 import logging
 from dataclasses import dataclass, field
 
-from vision_ai.entities.dictionaries import EntityDictionaries, load_dictionaries
+from entities.dictionaries import EntityDictionaries, load_dictionaries
 
 logger = logging.getLogger(__name__)
 

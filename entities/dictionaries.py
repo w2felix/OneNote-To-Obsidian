@@ -31,6 +31,11 @@ class EntityDictionaries:
     short_gene_symbols: set[str] = field(default_factory=set)
 
 
+def dictionaries_available() -> bool:
+    """Return True if the main ontology JSON files have been built."""
+    return (DATA_DIR / 'hgnc_genes.json').exists() and (DATA_DIR / 'mondo_diseases.json').exists()
+
+
 def load_dictionaries() -> EntityDictionaries:
     """Load all entity dictionaries. Cached after first call."""
     global _cached_dictionaries
@@ -97,7 +102,7 @@ def reload_dictionaries() -> EntityDictionaries:
     _cached_dictionaries = None
 
     # Clear derived caches that depend on dictionary data
-    from vision_ai.entities.extractor import _reset_disease_word_index
+    from entities.extractor import _reset_disease_word_index
     _reset_disease_word_index()
 
     return load_dictionaries()

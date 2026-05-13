@@ -7,7 +7,7 @@ each containing a Dataview query that lists all pages mentioning that entity.
 import logging
 from pathlib import Path
 
-from vision_ai.entities.dictionaries import load_dictionaries
+from entities.dictionaries import load_dictionaries
 
 logger = logging.getLogger(__name__)
 
