@@ -19,7 +19,7 @@ import re
 import subprocess
 import sys
 import tempfile
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -74,6 +74,23 @@ def parse_args():
         help='Re-convert all pages. "onenote" overwrites local files with fresh export; '
              '"obsidian" keeps local files but updates sync state to match them'
     )
+    parser.add_argument(
+        '--vision-ai', action='store_true',
+        help='Enable Vision AI analysis of embedded images and PDFs. '
+             'Creates AI summary notes in _ai_notes/ folders linked from the parent page.'
+    )
+    parser.add_argument(
+        '--vision-ai-force', action='store_true',
+        help='Re-run Vision AI analysis even for previously analyzed attachments'
+    )
+    parser.add_argument(
+        '--ai-tags', action='store_true',
+        help='Use Claude AI to generate semantic topic tags for each substantive page'
+    )
+    parser.add_argument(
+        '--ai-tags-force', action='store_true',
+        help='Re-tag pages even if content has not changed since last tagging'
+    )
     return parser.parse_args()
 
 
@@ -113,6 +130,8 @@ def file_hash(filepath: Path) -> str:
 
 def generate_export_script(temp_dir: Path, page_ids: list[str] | None = None) -> str:
     """Generate a PowerShell script that exports hierarchy and page content."""
+    # Use single-quoted string in PowerShell (no variable/subexpression expansion)
+    temp_dir_ps = str(temp_dir).replace("'", "''")
     temp_dir_escaped = str(temp_dir).replace('\\', '\\\\')
 
     if page_ids:
@@ -132,7 +151,7 @@ foreach ($pageId in $pageIds) {{
                 [System.Text.Encoding]::UTF8.GetBytes($pageId)
             )
         ).Replace("-","").Substring(0,16).ToLower()
-        $filename = "{temp_dir_escaped}\\\\$hash.xml"
+        $filename = "$exportDir\\$hash.xml"
         [System.IO.File]::WriteAllText($filename, $pageXml, [System.Text.Encoding]::UTF8)
         Write-Output "PROGRESS:$count/$($pageIds.Count)"
     }} catch {{
@@ -157,7 +176,7 @@ foreach ($page in $pages) {
                 [System.Text.Encoding]::UTF8.GetBytes($page.ID)
             )
         ).Replace("-","").Substring(0,16).ToLower()
-        $filename = "''' + temp_dir_escaped + '''\\$hash.xml"
+        $filename = "$exportDir\\$hash.xml"
         [System.IO.File]::WriteAllText($filename, $pageXml, [System.Text.Encoding]::UTF8)
         Write-Output "PROGRESS:$count/$($pages.Count):$($page.name)"
     } catch {
@@ -168,11 +187,12 @@ foreach ($page in $pages) {
 
     return f'''[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $onenote = New-Object -ComObject OneNote.Application
+$exportDir = '{temp_dir_ps}'
 
 # Export hierarchy
 [string]$hierarchy = ""
 $onenote.GetHierarchy("", 4, [ref]$hierarchy)
-[System.IO.File]::WriteAllText("{temp_dir_escaped}\\\\hierarchy.xml", $hierarchy, [System.Text.Encoding]::UTF8)
+[System.IO.File]::WriteAllText("$exportDir\\hierarchy.xml", $hierarchy, [System.Text.Encoding]::UTF8)
 Write-Output "HIERARCHY_DONE"
 
 # Export pages
@@ -218,7 +238,9 @@ def run_powershell_export(temp_dir: Path, page_ids: list[str] | None = None) -> 
     process.wait()
     if process.returncode != 0:
         stderr = process.stderr.read()
-        safe_print(f'  PowerShell warnings: {stderr[:200]}', file=sys.stderr)
+        # Redact user paths from error output
+        stderr_safe = re.sub(r'[A-Za-z]:\\Users\\[^\\]+', r'C:\\Users\\<USER>', stderr)
+        safe_print(f'  PowerShell warnings: {stderr_safe[:200]}', file=sys.stderr)
 
     return errors
 
@@ -286,27 +308,136 @@ def _collect_from_container(container, path_prefix: str, pages: list):
 
     for sec in container.get('sections', []):
         sec_path = f"{path_prefix}/{sec['name']}"
-        parent_stack = []
+        parent_stack = []  # stack of (name, index_in_pages)
         for page in sec['pages']:
             level = page['level']
             while len(parent_stack) >= level:
                 parent_stack.pop()
-            parent_name = parent_stack[-1] if parent_stack else None
-            parent_stack.append(page['name'])
+            parent_name = parent_stack[-1][0] if parent_stack else None
+            parent_idx = parent_stack[-1][1] if parent_stack else None
 
-            pages.append({
+            page_entry = {
                 **page,
                 'section_path': sec_path,
                 'parent_page': parent_name,
-            })
+                'children': [],
+            }
+            current_idx = len(pages)
+            pages.append(page_entry)
+
+            # Register as child of parent
+            if parent_idx is not None:
+                pages[parent_idx]['children'].append(page['name'])
+
+            parent_stack.append((page['name'], current_idx))
 
 
 # ============================================================================
 # Markdown Conversion
 # ============================================================================
 
-def convert_page_xml(xml_path: Path, page_info: dict, skip_images: bool = False) -> tuple[str, dict]:
+def _extract_authorship(root, ns) -> dict:
+    """Extract author, contributors, and last_modified_by from page XML.
+
+    Returns dict with keys: author, contributors, last_modified_by, last_modified_at
+    """
+    # Collect all (author, creationTime) and (lastModifiedBy, lastModifiedTime) from OE elements
+    authors_with_time = []  # (name, timestamp)
+    modifiers_with_time = []  # (name, timestamp)
+
+    for oe in root.iter(f'{{{ns["one"]}}}OE'):
+        author = oe.get('author')
+        created = oe.get('creationTime', '')
+        if author:
+            authors_with_time.append((author, created))
+
+        modifier = oe.get('lastModifiedBy')
+        modified = oe.get('lastModifiedTime', '')
+        if modifier:
+            modifiers_with_time.append((modifier, modified))
+
+    # Page-level lastModifiedBy (most authoritative for "last editor")
+    page_modifier = root.get('lastModifiedBy', '')
+    page_modified_time = root.get('lastModifiedTime', '')
+
+    # Determine original author: the name associated with the earliest creationTime
+    author = ''
+    if authors_with_time:
+        # Sort by timestamp, pick earliest
+        with_times = [(name, ts) for name, ts in authors_with_time if ts]
+        if with_times:
+            with_times.sort(key=lambda x: x[1])
+            author = with_times[0][0]
+        else:
+            author = authors_with_time[0][0]
+
+    # Collect all unique contributor names (preserving first-seen order)
+    seen = set()
+    contributors = []
+    for name, _ in authors_with_time + modifiers_with_time:
+        if name and name not in seen:
+            seen.add(name)
+            contributors.append(name)
+
+    # Last modified by
+    last_modified_by = page_modifier or (modifiers_with_time[-1][0] if modifiers_with_time else '')
+    last_modified_at = page_modified_time or (modifiers_with_time[-1][1] if modifiers_with_time else '')
+
+    return {
+        'author': author,
+        'contributors': contributors,
+        'last_modified_by': last_modified_by,
+        'last_modified_at': last_modified_at,
+    }
+
+
+def _extract_tags(root, ns) -> list[str]:
+    """Extract OneNote tags from page XML as a list of tag names.
+
+    OneNote uses <one:TagDef> to define tag index→name mappings (e.g. "To Do", "Important"),
+    and <one:Tag> on OE elements to reference them by index. The built-in "To Do" tags
+    are handled as checkboxes already, so we exclude index 0 (typically the checkbox tag).
+    """
+    # Build tag index → name map from TagDef elements
+    tag_defs = {}
+    for tag_def in root.findall('one:TagDef', ns):
+        idx = tag_def.get('index')
+        name = tag_def.get('name', '')
+        tag_type = tag_def.get('type', '')
+        if idx and name:
+            # Skip the To-Do/checkbox tag (type=0 or name "To Do") — already rendered as checkboxes
+            if tag_type == '0' or name.lower() == 'to do':
+                continue
+            tag_defs[idx] = name
+
+    if not tag_defs:
+        return []
+
+    # Collect all tags used on OE elements
+    used_tags = set()
+    for tag_elem in root.iter(f'{{{ns["one"]}}}Tag'):
+        idx = tag_elem.get('index')
+        if idx in tag_defs:
+            used_tags.add(tag_defs[idx])
+
+    # Convert to Obsidian-friendly tag format (lowercase, spaces→hyphens)
+    result = []
+    for tag_name in sorted(used_tags):
+        slug = tag_name.lower().replace(' ', '-')
+        # Remove characters not valid in Obsidian tags
+        slug = re.sub(r'[^a-z0-9_/\-]', '', slug)
+        if slug:
+            result.append(slug)
+
+    return result
+
+
+def convert_page_xml(xml_path: Path, page_info: dict, skip_images: bool = False,
+                     page_id_map: dict | None = None) -> tuple[str, dict]:
     """Convert OneNote page XML to Markdown string + dict of images."""
+    global _current_page_id_map, _current_checkbox_tag_indices
+    _current_page_id_map = page_id_map
+
     tree = ET.parse(xml_path)
     root = tree.getroot()
 
@@ -320,23 +451,71 @@ def convert_page_xml(xml_path: Path, page_info: dict, skip_images: bool = False)
         name = style_def.get('name', 'p')
         style_map[idx] = name
 
+    # Identify which tag indices are checkboxes (To-Do)
+    _current_checkbox_tag_indices = set()
+    for tag_def in root.findall('one:TagDef', ns):
+        tag_type = tag_def.get('type', '')
+        tag_name = tag_def.get('name', '')
+        if tag_type == '0' or tag_name.lower() == 'to do':
+            idx = tag_def.get('index')
+            if idx:
+                _current_checkbox_tag_indices.add(idx)
+
     # Get title
     title = page_info['name']
     title_elem = root.find('.//one:Title//one:T', ns)
     if title_elem is not None and title_elem.text:
         title = _extract_cdata_text(title_elem.text)
 
+    # Extract authorship info
+    authorship = _extract_authorship(root, ns)
+
     # Build frontmatter
     lines = ['---']
     lines.append(f'title: "{title.replace(chr(34), chr(39))}"')
+    if authorship['author']:
+        lines.append(f'author: "{authorship["author"]}"')
+    if authorship['contributors'] and len(authorship['contributors']) > 1:
+        lines.append('contributors:')
+        for contributor in authorship['contributors']:
+            lines.append(f'  - "{contributor}"')
+    if authorship['last_modified_by']:
+        lines.append(f'last_modified_by: "{authorship["last_modified_by"]}"')
+    if authorship['last_modified_at']:
+        lines.append(f'last_modified_at: {authorship["last_modified_at"]}')
     if page_info.get('created'):
         lines.append(f'created: {page_info["created"]}')
     if page_info.get('modified'):
         lines.append(f'modified: {page_info["modified"]}')
     lines.append('source: OneNote')
+
+    # Notebook and section from section_path (Feature 3)
+    section_path = page_info.get('section_path', '')
+    if section_path:
+        parts = section_path.strip('/').split('/')
+        if parts:
+            lines.append(f'notebook: "{parts[0]}"')
+        if len(parts) > 1:
+            lines.append(f'section: "{"/".join(parts[1:])}"')
+
     if page_info.get('parent_page'):
         safe_parent = page_info['parent_page'].replace('"', "'")
         lines.append(f'parent: "[[{safe_parent}]]"')
+
+    # Children backlinks (Feature 4)
+    if page_info.get('children'):
+        lines.append('children:')
+        for child_name in page_info['children']:
+            safe_child = child_name.replace('"', "'")
+            lines.append(f'  - "[[{safe_child}]]"')
+
+    # Tags from OneNote (Feature 1)
+    page_tags = _extract_tags(root, ns)
+    if page_tags:
+        lines.append('tags:')
+        for tag in page_tags:
+            lines.append(f'  - "{tag}"')
+
     lines.append('---')
     lines.append('')
     lines.append(f'# {title}')
@@ -362,6 +541,8 @@ def convert_page_xml(xml_path: Path, page_info: dict, skip_images: bool = False)
 
     markdown = '\n'.join(lines)
     markdown = re.sub(r'\n{3,}', '\n\n', markdown)
+    _current_page_id_map = None
+    _current_checkbox_tag_indices = set()
     return markdown, images
 
 
@@ -406,8 +587,10 @@ def _convert_oe(oe_elem, ns, style_map, images, skip_images, indent) -> str | No
     bullet = list_elem.find('one:Bullet', ns) if list_elem is not None else None
     number = list_elem.find('one:Number', ns) if list_elem is not None else None
 
-    # Check for tag (checkbox)
+    # Check for tag (only render as checkbox if it's a To-Do/checkbox tag)
     tag = oe_elem.find('one:Tag', ns)
+    is_checkbox_tag = (tag is not None and
+                       tag.get('index', '') in _current_checkbox_tag_indices)
 
     # Determine style/heading
     style_idx = oe_elem.get('quickStyleIndex', '')
@@ -417,7 +600,7 @@ def _convert_oe(oe_elem, ns, style_map, images, skip_images, indent) -> str | No
     prefix = ''
     indent_str = '  ' * indent
 
-    if tag is not None:
+    if is_checkbox_tag:
         completed = tag.get('completed', 'false') == 'true'
         checkbox = '[x] ' if completed else '[ ] '
         prefix = f'{indent_str}- {checkbox}'
@@ -480,6 +663,37 @@ def _convert_cdata_html(html_text: str) -> str:
     return _process_html_node(soup)
 
 
+# Module-level state set during convert_page_xml
+_current_page_id_map = None
+_current_checkbox_tag_indices = set()  # Tag indices that are To-Do (checkbox) tags
+
+
+def _resolve_onenote_link(href: str, text: str) -> str:
+    """Resolve a onenote:// URL to an Obsidian [[wikilink]] if possible."""
+    if not _current_page_id_map or not href.lower().startswith('onenote:'):
+        return f'[{text}]({href})'
+
+    # OneNote URLs contain page GUIDs in the fragment or path
+    # Format: onenote:...&page-id={GUID}... or onenote:#SectionName&page-id={GUID}
+    page_id_match = re.search(r'page-id=\{?([^}&]+)\}?', href, re.IGNORECASE)
+    if page_id_match:
+        page_id = page_id_match.group(1)
+        # Try exact match and with braces
+        for candidate in (page_id, f'{{{page_id}}}'):
+            if candidate in _current_page_id_map:
+                page_name = _current_page_id_map[candidate]
+                return f'[[{page_name}]]'
+
+    # Also try section-id for section links
+    section_id_match = re.search(r'section-id=\{?([^}&]+)\}?', href, re.IGNORECASE)
+    if section_id_match and not page_id_match:
+        # Section-only link — keep as text with note
+        return f'{text} *(OneNote section link)*'
+
+    # Couldn't resolve — keep original link text with marker
+    return f'{text} *(unresolved OneNote link)*'
+
+
 def _process_html_node(node) -> str:
     """Recursively process HTML nodes to markdown."""
     if isinstance(node, str):
@@ -492,6 +706,8 @@ def _process_html_node(node) -> str:
         href = node.get('href', '')
         text = node.get_text()
         if href:
+            if href.lower().startswith('onenote:'):
+                return _resolve_onenote_link(href, text)
             return f'[{text}]({href})'
         return text
 
@@ -532,11 +748,34 @@ def _convert_image(image_elem, ns, images: dict) -> str:
     except Exception:
         return ''
 
-    content_hash = hashlib.md5(image_data).hexdigest()[:12]
+    content_hash = hashlib.sha256(image_data).hexdigest()[:12]
     filename = f'{content_hash}.png'
     images[filename] = image_data
 
     return f'![[{ATTACHMENTS_FOLDER}/{filename}]]'
+
+
+_ONENOTE_CACHE_DIRS = None
+
+
+def _is_safe_cache_path(path_str: str) -> bool:
+    """Validate that a cache path points to an allowed OneNote cache directory."""
+    global _ONENOTE_CACHE_DIRS
+    if _ONENOTE_CACHE_DIRS is None:
+        home = Path.home()
+        _ONENOTE_CACHE_DIRS = [
+            home / 'AppData' / 'Local' / 'Microsoft' / 'OneNote',
+            home / 'AppData' / 'Local' / 'Temp',
+            home / 'AppData' / 'Local' / 'Packages',  # UWP OneNote
+        ]
+    try:
+        resolved = Path(path_str).resolve()
+        return any(
+            resolved == allowed or allowed in resolved.parents
+            for allowed in _ONENOTE_CACHE_DIRS
+        )
+    except (ValueError, OSError):
+        return False
 
 
 def _convert_inserted_file(file_elem, ns, images: dict) -> str:
@@ -552,7 +791,7 @@ def _convert_inserted_file(file_elem, ns, images: dict) -> str:
 
     if file_data is None:
         cache_path = file_elem.get('pathCache', '')
-        if cache_path and Path(cache_path).exists():
+        if cache_path and _is_safe_cache_path(cache_path) and Path(cache_path).exists():
             try:
                 file_data = Path(cache_path).read_bytes()
             except Exception:
@@ -566,12 +805,12 @@ def _convert_inserted_file(file_elem, ns, images: dict) -> str:
         original_name = original_name.rsplit('\\', 1)[-1].rsplit('/', 1)[-1]
 
     if not original_name:
-        content_hash = hashlib.md5(file_data).hexdigest()[:12]
+        content_hash = hashlib.sha256(file_data).hexdigest()[:12]
         original_name = f'{content_hash}.bin'
 
     safe_name = sanitize_filename(Path(original_name).stem)
     ext = Path(original_name).suffix.lower()
-    content_hash = hashlib.md5(file_data).hexdigest()[:8]
+    content_hash = hashlib.sha256(file_data).hexdigest()[:8]
     filename = f'{safe_name}_{content_hash}{ext}'
 
     images[filename] = file_data
@@ -614,6 +853,13 @@ def _convert_table(table_elem, ns) -> str:
 # File Path Utilities
 # ============================================================================
 
+_WINDOWS_RESERVED = frozenset({
+    'CON', 'PRN', 'AUX', 'NUL',
+    'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+    'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9',
+})
+
+
 def sanitize_filename(name: str) -> str:
     """Remove characters invalid for file paths on Windows."""
     invalid_chars = r'<>:"/\|?*'
@@ -622,6 +868,9 @@ def sanitize_filename(name: str) -> str:
         result = result.replace(ch, '_')
     result = result.rstrip('. ')
     result = re.sub(r'_+', '_', result)
+    # Block Windows reserved device names
+    if result.split('.')[0].upper() in _WINDOWS_RESERVED:
+        result = f'_{result}'
     if len(result) > 100:
         result = result[:100]
     return result or 'Untitled'
@@ -638,6 +887,124 @@ def compute_output_path(page_info: dict, vault_mode: str) -> str:
 
     page_name = sanitize_filename(page_info['name'])
     return '/'.join(safe_parts + [page_name + '.md'])
+
+
+# ============================================================================
+# Auto-Wikilinks & AI Tags
+# ============================================================================
+
+def _split_frontmatter(markdown: str) -> tuple[str, str]:
+    """Split markdown into (frontmatter, body). Frontmatter includes the --- delimiters."""
+    if not markdown.startswith('---'):
+        return '', markdown
+    end_idx = markdown.index('---', 3) + 3
+    return markdown[:end_idx], markdown[end_idx:]
+
+
+def _auto_wikify(markdown: str, all_page_names: set[str], current_page_name: str) -> str:
+    """Replace mentions of other page names with [[wikilinks]] in body text."""
+    frontmatter, body = _split_frontmatter(markdown)
+    if not body.strip():
+        return markdown
+
+    # Sort names longest-first to avoid partial matches
+    candidates = sorted(
+        (name for name in all_page_names
+         if name != current_page_name and len(name) > 3),
+        key=len, reverse=True
+    )
+
+    if not candidates:
+        return markdown
+
+    # Split body into protected and unprotected segments
+    # Protected: code blocks (``` ... ```), inline code (` ... `),
+    #            existing wikilinks [[...]], markdown links [...](...)
+    protected_pattern = re.compile(
+        r'```[\s\S]*?```'       # fenced code blocks
+        r'|`[^`\n]+`'          # inline code
+        r'|\[\[[^\]]+\]\]'     # wikilinks
+        r'|\[[^\]]*\]\([^)]*\)'  # markdown links
+    )
+
+    # Build segments: list of (text, is_protected)
+    segments = []
+    last_end = 0
+    for m in protected_pattern.finditer(body):
+        if m.start() > last_end:
+            segments.append((body[last_end:m.start()], False))
+        segments.append((m.group(), True))
+        last_end = m.end()
+    if last_end < len(body):
+        segments.append((body[last_end:], False))
+
+    # Replace in unprotected segments
+    for name in candidates:
+        pattern = re.compile(r'\b' + re.escape(name) + r'\b', re.IGNORECASE)
+        new_segments = []
+        for text, protected in segments:
+            if protected:
+                new_segments.append((text, True))
+            else:
+                # Replace matches but preserve original case in the link display
+                def _make_link(match):
+                    return f'[[{name}]]'
+                new_text = pattern.sub(_make_link, text)
+                new_segments.append((new_text, False))
+        segments = new_segments
+
+    new_body = ''.join(text for text, _ in segments)
+    return frontmatter + new_body
+
+
+def _inject_ai_tags(markdown: str, ai_tags: list[str]) -> str:
+    """Merge AI-generated tags into the frontmatter tags: field."""
+    if not ai_tags:
+        return markdown
+
+    frontmatter, body = _split_frontmatter(markdown)
+    if not frontmatter:
+        return markdown
+
+    lines = frontmatter.split('\n')
+
+    # Find existing tags section
+    tags_start = None
+    tags_end = None
+    existing_tags = set()
+
+    for i, line in enumerate(lines):
+        if line.strip() == 'tags:':
+            tags_start = i
+        elif tags_start is not None and line.startswith('  - '):
+            # Extract tag value: "  - "value"" or "  - value"
+            tag_val = line.strip().removeprefix('- ').strip('"').strip("'")
+            existing_tags.add(tag_val)
+            tags_end = i
+        elif tags_start is not None and not line.startswith('  - '):
+            break
+
+    # Deduplicate: only add tags not already present
+    new_tags = [t for t in ai_tags if t not in existing_tags]
+    if not new_tags:
+        return markdown
+
+    if tags_start is not None:
+        # Insert after existing tags
+        insert_pos = (tags_end + 1) if tags_end is not None else (tags_start + 1)
+        for tag in reversed(new_tags):
+            lines.insert(insert_pos, f'  - "{tag}"')
+    else:
+        # Insert tags: section before the closing ---
+        closing_idx = len(lines) - 1
+        while closing_idx > 0 and lines[closing_idx].strip() != '---':
+            closing_idx -= 1
+        tag_lines = ['tags:'] + [f'  - "{tag}"' for tag in sorted(existing_tags | set(new_tags))]
+        for tl in reversed(tag_lines):
+            lines.insert(closing_idx, tl)
+
+    new_frontmatter = '\n'.join(lines)
+    return new_frontmatter + body
 
 
 # ============================================================================
@@ -735,7 +1102,8 @@ def print_dry_run(actions: list[dict], state: dict):
     print(f'\nSummary: {len(actions)} actions pending')
 
 
-def execute_actions(actions: list[dict], state: dict, args, temp_dir: Path):
+def execute_actions(actions: list[dict], state: dict, args, temp_dir: Path,
+                    page_id_map: dict | None = None, all_page_names: set[str] | None = None):
     """Execute sync actions: export pages, write files, update state."""
     if not actions:
         print('  Nothing to sync — all pages up to date.')
@@ -794,9 +1162,11 @@ def execute_actions(actions: list[dict], state: dict, args, temp_dir: Path):
         if atype == 'keep_obsidian':
             _handle_keep_obsidian(action, state, args, full_path, rel_path)
         elif atype == 'conflict':
-            _handle_conflict(action, state, args, temp_dir, full_path, out_dir, rel_path)
+            _handle_conflict(action, state, args, temp_dir, full_path, out_dir, rel_path,
+                             page_id_map, all_page_names)
         elif atype in ('new', 'update', 'reexport'):
-            _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path)
+            _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
+                           page_id_map, all_page_names)
 
         safe_print(f'\r  [{atype[0].upper()}] {i+1}/{len(actions)} {page.get("name", "")[:50]:<50}',
                    end='', flush=True)
@@ -820,7 +1190,53 @@ def _handle_keep_obsidian(action, state, args, full_path, rel_path):
     }
 
 
-def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path):
+def _parse_embed_order(markdown: str) -> list[dict]:
+    """Parse the embed order from generated markdown for Vision AI context."""
+    embed_order = []
+    current_text = []
+    lines = markdown.split('\n')
+
+    # Skip YAML frontmatter block if present
+    start = 0
+    if lines and lines[0].strip() == '---':
+        for i in range(1, len(lines)):
+            if lines[i].strip() == '---':
+                start = i + 1
+                break
+
+    for line in lines[start:]:
+        stripped = line.strip()
+        # Match ![[_attachments/filename]] or [[_attachments/filename]]
+        embed_match = re.match(r'!?\[\[_attachments/(.+?)\]\]', stripped)
+        if embed_match:
+            if current_text:
+                text = '\n'.join(current_text).strip()
+                if text:
+                    embed_order.append({'type': 'text', 'filename': '', 'text': text})
+                current_text = []
+            filename = embed_match.group(1)
+            embed_order.append({'type': 'image' if stripped.startswith('!') else 'file',
+                                'filename': filename, 'text': ''})
+        elif stripped.startswith('#'):
+            if current_text:
+                text = '\n'.join(current_text).strip()
+                if text:
+                    embed_order.append({'type': 'text', 'filename': '', 'text': text})
+                current_text = []
+            embed_order.append({'type': 'text', 'filename': '', 'text': stripped})
+        elif stripped:
+            current_text.append(stripped)
+
+    if current_text:
+        text = '\n'.join(current_text).strip()
+        if text:
+            embed_order.append({'type': 'text', 'filename': '', 'text': text})
+
+    return embed_order
+
+
+def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
+                   page_id_map=None, all_page_names=None):
     """Export or update a page."""
     page = action['page']
     key = action['key']
@@ -829,7 +1245,31 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path):
     if not xml_path.exists():
         return
 
-    markdown, images = convert_page_xml(xml_path, page, args.skip_images)
+    markdown, images = convert_page_xml(xml_path, page, args.skip_images, page_id_map)
+
+    # AI semantic tags (before wikilinks so tags don't get wikified)
+    if args.ai_tags and not args.dry_run:
+        try:
+            from vision_ai.tagger import generate_tags
+            ai_tags = generate_tags(
+                markdown_body=markdown,
+                page_title=page['name'],
+                section_path=page.get('section_path', ''),
+                existing_tags=[],
+                state=state,
+                page_key=key,
+                force=args.ai_tags_force,
+            )
+            if ai_tags:
+                markdown = _inject_ai_tags(markdown, ai_tags)
+        except ImportError as e:
+            print(f'\n  [!] AI tags dependencies not available: {e}')
+        except Exception as e:
+            print(f'\n  [!] AI tags failed for {page["name"]}: {e}')
+
+    # Auto-wikilinks
+    if all_page_names:
+        markdown = _auto_wikify(markdown, all_page_names, page['name'])
 
     # Write markdown file
     full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -841,6 +1281,33 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path):
         att_dir.mkdir(exist_ok=True)
         for img_name, img_data in images.items():
             (att_dir / img_name).write_bytes(img_data)
+
+    # Vision AI post-processing
+    if args.vision_ai and images and not args.dry_run:
+        try:
+            from vision_ai import analyze_page_attachments
+        except ImportError as e:
+            print(f'\n  [!] Vision AI dependencies not installed: {e}')
+            print('      Install with: pip install anthropic pymupdf pdfplumber python-pptx pandas tabulate')
+        else:
+            try:
+                embed_order = _parse_embed_order(markdown)
+                page_context = {
+                    'page_name': page['name'],
+                    'section_path': page.get('section_path', ''),
+                    'markdown_text': markdown,
+                    'parent_page': page.get('parent_page'),
+                    'embed_order': embed_order,
+                }
+                analyze_page_attachments(
+                    page_md_path=full_path,
+                    attachments_dir=full_path.parent / ATTACHMENTS_FOLDER,
+                    images=images,
+                    page_context=page_context,
+                    force=args.vision_ai_force,
+                )
+            except Exception as e:
+                print(f'\n  [!] Vision AI failed for {page["name"]}: {e}')
 
     # Update state
     state['pages'][key] = {
@@ -854,7 +1321,8 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path):
     }
 
 
-def _handle_conflict(action, state, args, temp_dir, full_path, out_dir, rel_path):
+def _handle_conflict(action, state, args, temp_dir, full_path, out_dir, rel_path,
+                     page_id_map=None, all_page_names=None):
     """Handle conflict: write OneNote version as conflict file, keep Obsidian version."""
     page = action['page']
     key = action['key']
@@ -864,7 +1332,11 @@ def _handle_conflict(action, state, args, temp_dir, full_path, out_dir, rel_path
     if not xml_path.exists():
         return
 
-    markdown, images = convert_page_xml(xml_path, page, args.skip_images)
+    markdown, images = convert_page_xml(xml_path, page, args.skip_images, page_id_map)
+
+    # Auto-wikilinks on conflict file too
+    if all_page_names:
+        markdown = _auto_wikify(markdown, all_page_names, page['name'])
 
     # Generate conflict filename
     today = datetime.now().strftime('%Y-%m-%d')
@@ -951,11 +1423,13 @@ def main():
             errors = run_powershell_export(temp_dir, page_ids=None)
         else:
             # Incremental or dry-run: only get hierarchy first
+            temp_dir_ps = str(temp_dir).replace("'", "''")
             hierarchy_script = f'''[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $onenote = New-Object -ComObject OneNote.Application
+$exportDir = '{temp_dir_ps}'
 [string]$hierarchy = ""
 $onenote.GetHierarchy("", 4, [ref]$hierarchy)
-[System.IO.File]::WriteAllText("{str(temp_dir).replace(chr(92), '/')}/hierarchy.xml", $hierarchy, [System.Text.Encoding]::UTF8)
+[System.IO.File]::WriteAllText("$exportDir\\hierarchy.xml", $hierarchy, [System.Text.Encoding]::UTF8)
 Write-Output "DONE"
 '''
             script_path = temp_dir / 'hierarchy_only.ps1'
@@ -1000,10 +1474,15 @@ Write-Output "DONE"
         else:
             actions = determine_actions(state, all_pages, args)
 
+        # Build page ID → name map for resolving onenote:// links
+        page_id_map = {p['id']: p['name'] for p in all_pages}
+        # Build set of all page names for auto-wikilinks
+        all_page_names = {p['name'] for p in all_pages}
+
         if args.dry_run:
             print_dry_run(actions, state)
         else:
-            execute_actions(actions, state, args, temp_dir)
+            execute_actions(actions, state, args, temp_dir, page_id_map, all_page_names)
             save_sync_state(state, args.output_dir)
 
             # Summary
