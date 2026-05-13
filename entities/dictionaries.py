@@ -9,7 +9,7 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path(__file__).parent.parent.parent / 'entity_data'
+DATA_DIR = Path(__file__).parent.parent / 'entity_data'
 
 _cached_dictionaries = None
 
