@@ -16,7 +16,7 @@ TAGGER_MODEL = "claude-sonnet-4-6"
 
 COMBINED_SYSTEM_PROMPT = """You are a knowledge-base taxonomist and biomedical annotator. Given this note, return:
 1. 3-7 topic tags (lowercase, hyphenated)
-2. Biomedical entities found in the text
+2. Biomedical entities and organizational roles found in the text
 
 Return ONLY a JSON object with this structure:
 {
@@ -26,14 +26,17 @@ Return ONLY a JSON object with this structure:
     "drugs": ["pembrolizumab", "osimertinib"],
     "diseases": ["NSCLC", "melanoma"],
     "compounds": ["M1774"],
-    "companies": ["Roche", "AstraZeneca"]
+    "companies": ["Roche", "AstraZeneca"],
+    "roles": ["Principal Scientist", "Director"]
   }
 }
 
 Tag rules:
 - Lowercase, hyphenated (e.g., "machine-learning", "project-alpha")
-- Specific enough to be useful (not "notes" or "misc")
-- Cover: topic/domain, project/team if applicable, document-type if distinctive
+- Specific enough to be useful for filtering and discovery
+- NEVER use single common English words as tags (e.g., "research", "summary", "overview", "other", "general", "questions", "data", "analysis", "results", "discussion", "methods")
+- DO include specific platform/tool names when central to the page (e.g., "gitlab", "docker", "nextflow", "rstudio", "jupyter")
+- Cover: topic/domain, project/team if applicable, tools/platforms used, document-type if distinctive
 
 Entity rules:
 - genes: Use official HGNC gene symbols (uppercase). Include protein names as gene symbols.
@@ -41,6 +44,7 @@ Entity rules:
 - diseases: Use common abbreviations where standard (NSCLC, CRC, AML), otherwise use the full name.
 - compounds: Internal codes matching M followed by 4 digits (e.g., M1774, M3814).
 - companies: Pharma/biotech/diagnostics companies mentioned. Use canonical company names.
+- roles: Organizational titles and positions (e.g., "Principal Scientist", "Associate Director", "Intern", "Group Leader"). Use the title as written.
 - Only include entities actually mentioned in the text.
 - If no biomedical entities are present, return empty lists."""
 
@@ -94,7 +98,7 @@ Content:
 
     # Normalize entity lists
     normalized_entities = {}
-    for key in ('genes', 'drugs', 'diseases', 'compounds', 'companies'):
+    for key in ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles'):
         vals = entities.get(key, [])
         if isinstance(vals, list):
             normalized_entities[key] = [str(v).strip() for v in vals if v]

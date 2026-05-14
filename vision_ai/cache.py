@@ -56,8 +56,10 @@ def is_cached(cache: dict, cache_key: str, current_hash: str,
         return False
     if entry.get('content_hash') != current_hash:
         return False
-    ai_note_file = ai_notes_dir / entry.get('ai_note_file', '')
-    if not ai_note_file.exists():
+    ai_note_file = entry.get('ai_note_file', '')
+    if any(c in ai_note_file for c in '#[]'):
+        return False
+    if not (ai_notes_dir / ai_note_file).exists():
         return False
     return True
 

@@ -1,10 +1,13 @@
-"""One-stop setup: install dependencies, Tesseract, and entity dictionaries.
+"""One-stop setup: install dependencies, Tesseract OCR, and entity dictionaries.
 
 Run once after cloning the repo:
     python setup.py
 
 Re-run to update entity ontologies (updated monthly):
     python setup.py --update-entities
+
+Set up Tesseract manually (no admin rights):
+    python setup.py --setup-tesseract
 """
 
 import argparse
@@ -35,23 +38,23 @@ PIP_PACKAGES = [
 CONDA_PACKAGES = [
     'pandas',
     'openpyxl',
-    'tesseract',
     'pytesseract',
 ]
 
-# ── Ontology downloads ────────────────────────────────────────────────────────
+# ── Tesseract ────────────────────────────────────────────────────────────────
 
-DOWNLOADS = [
-    (
-        'hgnc_complete_set.tsv',
-        'https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/hgnc_complete_set.txt',
-        '~16 MB',
-    ),
-    (
-        'mondo.json',
-        'https://github.com/monarch-initiative/mondo/releases/latest/download/mondo.json',
-        '~99 MB',
-    ),
+TESSERACT_DOWNLOAD_URL = (
+    'https://github.com/UB-Mannheim/tesseract/releases/download/'
+    'v5.5.0.20241111/tesseract-ocr-w64-setup-5.5.0.20241111.exe'
+)
+TESSERACT_FILENAME = 'tesseract-ocr-w64-setup-5.5.0.20241111.exe'
+
+TESSERACT_SEARCH_PATHS = [
+    Path(os.environ.get('LOCALAPPDATA', '')) / 'Programs' / 'Tesseract-OCR',
+    Path(os.environ.get('CONDA_PREFIX', '')) / 'Library' / 'bin',
+    Path(r'C:\Program Files\Tesseract-OCR'),
+    Path(r'C:\Program Files (x86)\Tesseract-OCR'),
+    Path.home() / 'AppData' / 'Local' / 'Programs' / 'Tesseract-OCR',
 ]
 
 
@@ -77,7 +80,6 @@ def conda_executable() -> str | None:
     conda_prefix = os.environ.get('CONDA_PREFIX')
     if not conda_prefix:
         return None
-    # Try common locations
     for candidate in ['conda', os.path.join(conda_prefix, '..', '..', 'Scripts', 'conda')]:
         try:
             result = subprocess.run(
@@ -88,6 +90,8 @@ def conda_executable() -> str | None:
             continue
     return None
 
+
+# ── Package Installation ─────────────────────────────────────────────────────
 
 def install_pip_packages():
     section('Installing pip packages')
@@ -100,7 +104,7 @@ def install_pip_packages():
 
 
 def install_conda_packages(conda: str):
-    section('Installing conda packages (pandas, openpyxl, tesseract, pytesseract)')
+    section('Installing conda packages (pandas, openpyxl, pytesseract)')
     run(
         [conda, 'install', '-c', 'conda-forge', '--yes'] + CONDA_PACKAGES,
         'conda install',
@@ -109,14 +113,211 @@ def install_conda_packages(conda: str):
 
 def warn_no_conda():
     print('\n  [!] Not running inside a conda environment.')
-    print('      pandas and openpyxl will be installed via pip (usually fine).')
-    print('      Tesseract cannot be installed automatically — install it manually:')
-    print('        conda install -c conda-forge tesseract pytesseract')
-    print('        OR download from https://github.com/UB-Mannheim/tesseract/wiki')
+    print('      pandas and openpyxl will be installed via pip.')
+    print('      pytesseract will be installed via pip.')
     run(
-        [sys.executable, '-m', 'pip', 'install', 'pandas', 'openpyxl'],
-        'pip install pandas openpyxl',
+        [sys.executable, '-m', 'pip', 'install', 'pandas', 'openpyxl', 'pytesseract'],
+        'pip install pandas openpyxl pytesseract',
     )
+
+
+# ── Tesseract Detection & Installation ──────────────────────────────────────
+
+def find_tesseract() -> Path | None:
+    """Search common locations for the Tesseract binary."""
+    # Check PATH first
+    result = subprocess.run(
+        ['tesseract', '--version'], capture_output=True, text=True)
+    if result.returncode == 0:
+        # Find the actual path
+        where = subprocess.run(
+            ['where', 'tesseract'], capture_output=True, text=True)
+        if where.returncode == 0:
+            return Path(where.stdout.strip().splitlines()[0]).parent
+        return Path('tesseract')  # In PATH but can't resolve directory
+
+    # Search known locations
+    for search_path in TESSERACT_SEARCH_PATHS:
+        candidate = search_path / 'tesseract.exe'
+        if candidate.exists():
+            return search_path
+
+    return None
+
+
+def set_user_env_var(name: str, value: str):
+    """Set a Windows User environment variable via winreg."""
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r'Environment',
+            0, winreg.KEY_SET_VALUE,
+        )
+        winreg.SetValueEx(key, name, 0, winreg.REG_EXPAND_SZ, value)
+        winreg.CloseKey(key)
+        return True
+    except Exception as e:
+        print(f'  [!] Could not set {name}: {e}')
+        return False
+
+
+def add_to_user_path(directory: str):
+    """Add a directory to the User PATH environment variable."""
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r'Environment',
+            0, winreg.KEY_QUERY_VALUE | winreg.KEY_SET_VALUE,
+        )
+        try:
+            current_path, _ = winreg.QueryValueEx(key, 'Path')
+        except FileNotFoundError:
+            current_path = ''
+
+        # Check if already in PATH
+        paths = [p.strip() for p in current_path.split(';') if p.strip()]
+        dir_lower = directory.lower()
+        if any(p.lower() == dir_lower for p in paths):
+            print(f'  {directory} already in User PATH.')
+            winreg.CloseKey(key)
+            return True
+
+        new_path = current_path.rstrip(';') + ';' + directory
+        winreg.SetValueEx(key, 'Path', 0, winreg.REG_EXPAND_SZ, new_path)
+        winreg.CloseKey(key)
+        print(f'  Added {directory} to User PATH.')
+        return True
+    except Exception as e:
+        print(f'  [!] Could not modify PATH: {e}')
+        return False
+
+
+def setup_tesseract_manual():
+    """Guide user through no-admin Tesseract installation."""
+    section('Tesseract OCR Setup (no admin rights)')
+
+    # Check if already installed
+    existing = find_tesseract()
+    if existing:
+        print(f'\n  Tesseract found at: {existing}')
+        configure_tesseract_path(existing)
+        return
+
+    install_dir = Path(os.environ.get('LOCALAPPDATA', '')) / 'Programs' / 'Tesseract-OCR'
+
+    print(f'''
+  Tesseract OCR is needed for text extraction from screenshots.
+  It will be installed to: {install_dir}
+
+  Steps:
+  1. Download the installer from GitHub
+  2. Extract it using the installer (select "Install for current user")
+     Install location: {install_dir}
+  3. This script will configure the PATH automatically
+
+  Alternatively, if you have 7-Zip:
+  1. Download the installer .exe
+  2. Right-click > 7-Zip > Extract to folder
+  3. Copy the extracted folder to: {install_dir}
+''')
+
+    # Try to download
+    download_dir = Path(os.environ.get('TEMP', '.'))
+    dest = download_dir / TESSERACT_FILENAME
+
+    if dest.exists():
+        print(f'  Installer already downloaded: {dest}')
+    else:
+        print(f'  Downloading Tesseract installer ({TESSERACT_FILENAME})...')
+        try:
+            def progress(block_count, block_size, total_size):
+                if total_size > 0:
+                    pct = min(100, block_count * block_size * 100 // total_size)
+                    print(f'\r    {pct}%', end='', flush=True)
+            urllib.request.urlretrieve(TESSERACT_DOWNLOAD_URL, dest, reporthook=progress)
+            print(f'\r  Downloaded to: {dest}')
+        except Exception as e:
+            print(f'\n  Download failed: {e}')
+            print(f'  Manual download: {TESSERACT_DOWNLOAD_URL}')
+            return
+
+    # Offer to run the installer for current user
+    print(f'\n  Running installer (select "Install for current user only")...')
+    print(f'  Install to: {install_dir}')
+    try:
+        subprocess.run([str(dest), f'/D={install_dir}'], check=False)
+    except Exception as e:
+        print(f'  Could not run installer: {e}')
+        print(f'  Run it manually: {dest}')
+        print(f'  Set install location to: {install_dir}')
+
+    # Check if it worked
+    if (install_dir / 'tesseract.exe').exists():
+        print(f'\n  Tesseract installed successfully!')
+        configure_tesseract_path(install_dir)
+    else:
+        print(f'\n  Tesseract not found at expected location.')
+        print(f'  If you installed to a different folder, run:')
+        print(f'    python setup.py --setup-tesseract --tesseract-path "C:\\path\\to\\Tesseract-OCR"')
+
+
+def configure_tesseract_path(tesseract_dir: Path):
+    """Configure PATH and TESSDATA_PREFIX for Tesseract."""
+    tesseract_dir = Path(tesseract_dir)
+    dir_str = str(tesseract_dir)
+
+    print(f'\n  Configuring Tesseract at: {dir_str}')
+
+    # Add to User PATH
+    add_to_user_path(dir_str)
+
+    # Set TESSDATA_PREFIX
+    tessdata = tesseract_dir / 'tessdata'
+    if tessdata.exists():
+        set_user_env_var('TESSDATA_PREFIX', str(tessdata))
+        os.environ['TESSDATA_PREFIX'] = str(tessdata)
+        print(f'  Set TESSDATA_PREFIX = {tessdata}')
+
+    # Also set for current process
+    os.environ['PATH'] = dir_str + ';' + os.environ.get('PATH', '')
+
+    # Verify
+    result = subprocess.run(
+        [str(tesseract_dir / 'tesseract.exe'), '--version'],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        version = result.stdout.splitlines()[0] if result.stdout else 'unknown'
+        print(f'  Tesseract version: {version}')
+        print(f'\n  NOTE: Restart your terminal for PATH changes to take effect.')
+    else:
+        print(f'  [!] Could not verify Tesseract. Check the installation.')
+
+
+def setup_tesseract_conda(conda: str):
+    """Install Tesseract via conda."""
+    run(
+        [conda, 'install', '-c', 'conda-forge', '--yes', 'tesseract'],
+        'conda install tesseract',
+    )
+
+
+# ── Ontology Downloads ───────────────────────────────────────────────────────
+
+DOWNLOADS = [
+    (
+        'hgnc_complete_set.tsv',
+        'https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/hgnc_complete_set.txt',
+        '~16 MB',
+    ),
+    (
+        'mondo.json',
+        'https://github.com/monarch-initiative/mondo/releases/latest/download/mondo.json',
+        '~99 MB',
+    ),
+]
 
 
 def download_file(filename: str, url: str, size_hint: str, force: bool):
@@ -160,6 +361,8 @@ def setup_entities(force: bool):
         print('\n  Entity dictionaries ready.')
 
 
+# ── Verification ─────────────────────────────────────────────────────────────
+
 def verify():
     section('Verifying installation')
     checks = [
@@ -177,7 +380,7 @@ def verify():
         else:
             print(f'  [!] {name} packages: some missing — {result.stderr.strip()[:120]}')
 
-    # Functional Tesseract test: actually run OCR on a tiny in-memory image
+    # Functional Tesseract test
     ocr_test = (
         'from PIL import Image, ImageDraw; import pytesseract; '
         'img = Image.new("RGB", (200, 50), color="white"); '
@@ -189,15 +392,13 @@ def verify():
     if result.returncode == 0:
         print(result.stdout.strip())
     else:
-        # Check whether the binary exists at all to give a better error
-        ver = subprocess.run(['tesseract', '--version'], capture_output=True, text=True)
-        if ver.returncode == 0:
-            print(f'  [!] Tesseract installed ({ver.stdout.splitlines()[0].strip()}) '
-                  f'but OCR test failed:')
+        tess_path = find_tesseract()
+        if tess_path:
+            print(f'  [!] Tesseract found at {tess_path} but OCR test failed.')
             print(f'      {result.stderr.strip()[:200]}')
         else:
             print('  [!] Tesseract not found — OCR will be skipped (screenshot text extraction disabled)')
-            print('      To install: conda install -c conda-forge tesseract pytesseract')
+            print('      Run: python setup.py --setup-tesseract')
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -212,20 +413,54 @@ def main():
         '--skip-packages', action='store_true',
         help='Skip package installation (only set up entity dictionaries)',
     )
+    parser.add_argument(
+        '--setup-tesseract', action='store_true',
+        help='Set up Tesseract OCR without admin rights',
+    )
+    parser.add_argument(
+        '--tesseract-path', type=Path, default=None,
+        help='Path to existing Tesseract installation folder (skips download)',
+    )
     args = parser.parse_args()
 
     print('=' * 60)
     print('  OneNote to Obsidian — Setup')
     print('=' * 60)
 
+    # Tesseract-only setup
+    if args.setup_tesseract or args.tesseract_path:
+        if args.tesseract_path:
+            if (args.tesseract_path / 'tesseract.exe').exists():
+                configure_tesseract_path(args.tesseract_path)
+            else:
+                print(f'\n  ERROR: tesseract.exe not found in {args.tesseract_path}')
+                sys.exit(1)
+        else:
+            setup_tesseract_manual()
+        verify()
+        print('\n' + '=' * 60)
+        print('  Tesseract setup complete.')
+        print('=' * 60 + '\n')
+        return
+
+    # Full setup
     if not args.skip_packages:
         install_pip_packages()
 
         conda = conda_executable()
         if conda:
             install_conda_packages(conda)
+            # Tesseract via conda
+            setup_tesseract_conda(conda)
         else:
             warn_no_conda()
+            # Try to find or set up Tesseract
+            tess_path = find_tesseract()
+            if tess_path:
+                print(f'\n  Tesseract found at: {tess_path}')
+                configure_tesseract_path(tess_path)
+            else:
+                print('\n  [!] Tesseract not found. Run later: python setup.py --setup-tesseract')
 
     setup_entities(force=args.update_entities)
     verify()

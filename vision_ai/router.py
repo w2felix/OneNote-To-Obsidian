@@ -110,6 +110,14 @@ def _process_group(group: AttachmentGroup, images: dict[str, bytes],
         logger.debug(f"  Cached: {cache_key}")
         return None
 
+    # Clean up old file with bad characters in name
+    old_entry = cache.get('entries', {}).get(cache_key)
+    if old_entry:
+        old_file = old_entry.get('ai_note_file', '')
+        if any(c in old_file for c in '#[]') and (ai_notes_dir / old_file).exists():
+            (ai_notes_dir / old_file).unlink()
+            logger.info(f"  Removed bad-name file: {old_file}")
+
     # Get worker
     worker = _get_worker(group.worker_type)
     if worker is None:

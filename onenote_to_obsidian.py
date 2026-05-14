@@ -108,6 +108,11 @@ def parse_args():
         '--no-entity-index', action='store_true',
         help='Skip entity index generation'
     )
+    parser.add_argument(
+        '--dataview', action='store_true',
+        help='Use Dataview mode: entities in YAML frontmatter + entity index pages. '
+             'Without this flag, entities are linked as native [[wikilinks]] in body text.'
+    )
     return parser.parse_args()
 
 
@@ -488,10 +493,17 @@ def _extract_tags(root, ns) -> list[str]:
     return result
 
 
+_MONOSPACE_FONTS = frozenset({
+    'consolas', 'courier', 'courier new', 'lucida console',
+    'source code pro', 'fira code', 'jetbrains mono',
+    'cascadia code', 'cascadia mono', 'monospace',
+})
+
+
 def convert_page_xml(xml_path: Path, page_info: dict, skip_images: bool = False,
                      page_id_map: dict | None = None) -> tuple[str, dict]:
     """Convert OneNote page XML to Markdown string + dict of images."""
-    global _current_page_id_map, _current_checkbox_tag_indices
+    global _current_page_id_map, _current_checkbox_tag_indices, _current_monospace_styles
     _current_page_id_map = page_id_map
 
     tree = ET.parse(xml_path)
@@ -502,10 +514,16 @@ def convert_page_xml(xml_path: Path, page_info: dict, skip_images: bool = False,
 
     # Build style map from QuickStyleDefs
     style_map = {}
+    monospace_styles = set()
     for style_def in root.findall('one:QuickStyleDef', ns):
         idx = style_def.get('index')
         name = style_def.get('name', 'p')
         style_map[idx] = name
+        font = (style_def.get('font') or '').lower()
+        if font and any(mono in font for mono in _MONOSPACE_FONTS):
+            monospace_styles.add(idx)
+
+    _current_monospace_styles = monospace_styles
 
     # Identify which tag indices are checkboxes (To-Do)
     _current_checkbox_tag_indices = set()
@@ -599,7 +617,11 @@ def convert_page_xml(xml_path: Path, page_info: dict, skip_images: bool = False,
     markdown = re.sub(r'\n{3,}', '\n\n', markdown)
     _current_page_id_map = None
     _current_checkbox_tag_indices = set()
+    _current_monospace_styles = set()
     return markdown, images
+
+
+_CODE_LINE_SENTINEL = '\x00CODE\x00'
 
 
 def _convert_oe_children(elem, ns, style_map, images, skip_images, indent) -> str:
@@ -617,7 +639,31 @@ def _convert_oe_children(elem, ns, style_map, images, skip_images, indent) -> st
             if nested_content:
                 lines.append(nested_content)
 
-    return '\n'.join(lines)
+    return _group_code_lines(lines)
+
+
+def _group_code_lines(lines: list[str]) -> str:
+    """Group consecutive code-sentinel lines into fenced code blocks."""
+    result = []
+    code_block = []
+
+    for line in lines:
+        if line.startswith(_CODE_LINE_SENTINEL):
+            code_block.append(line[len(_CODE_LINE_SENTINEL):])
+        else:
+            if code_block:
+                result.append('```')
+                result.extend(code_block)
+                result.append('```')
+                code_block = []
+            result.append(line)
+
+    if code_block:
+        result.append('```')
+        result.extend(code_block)
+        result.append('```')
+
+    return '\n'.join(result)
 
 
 def _convert_oe(oe_elem, ns, style_map, images, skip_images, indent) -> str | None:
@@ -630,11 +676,18 @@ def _convert_oe(oe_elem, ns, style_map, images, skip_images, indent) -> str | No
     # Check for image
     image = oe_elem.find('one:Image', ns)
 
+    # Detect monospace-styled paragraph (code)
+    style_idx = oe_elem.get('quickStyleIndex', '')
+    is_monospace_para = style_idx in _current_monospace_styles
+
     # Get all text elements (there can be multiple T elements in one OE)
     text_parts = []
     for t_elem in oe_elem.findall('one:T', ns):
         if t_elem.text:
-            text_parts.append(_convert_cdata_html(t_elem.text))
+            if is_monospace_para:
+                text_parts.append(_extract_cdata_text(t_elem.text))
+            else:
+                text_parts.append(_convert_cdata_html(t_elem.text))
 
     text = ''.join(text_parts)
 
@@ -649,7 +702,6 @@ def _convert_oe(oe_elem, ns, style_map, images, skip_images, indent) -> str | No
                        tag.get('index', '') in _current_checkbox_tag_indices)
 
     # Determine style/heading
-    style_idx = oe_elem.get('quickStyleIndex', '')
     style_name = style_map.get(style_idx, 'p')
 
     # Build the line
@@ -693,6 +745,10 @@ def _convert_oe(oe_elem, ns, style_map, images, skip_images, indent) -> str | No
     if not text and not prefix:
         return ''
 
+    # Monospace paragraph without special formatting → code line
+    if is_monospace_para and not prefix and image is None:
+        return f'{_CODE_LINE_SENTINEL}{text}'
+
     return f'{prefix}{text}'
 
 
@@ -722,6 +778,7 @@ def _convert_cdata_html(html_text: str) -> str:
 # Module-level state set during convert_page_xml
 _current_page_id_map = None
 _current_checkbox_tag_indices = set()  # Tag indices that are To-Do (checkbox) tags
+_current_monospace_styles = set()  # QuickStyleDef indices with monospace fonts
 
 
 def _resolve_onenote_link(href: str, text: str) -> str:
@@ -769,6 +826,17 @@ def _process_html_node(node) -> str:
 
     if node.name == 'span':
         style = node.get('style', '')
+        font_match = re.search(r'font-family\s*:\s*([^;]+)', style, re.IGNORECASE)
+        if font_match:
+            font_val = font_match.group(1).lower()
+            is_monospace = any(f in font_val for f in _MONOSPACE_FONTS)
+        else:
+            is_monospace = False
+        if is_monospace:
+            raw_text = node.get_text()
+            if raw_text and '\n' not in raw_text:
+                return f'`{raw_text}`'
+            return raw_text or ''
         text = ''.join(_process_html_node(child) for child in node.children)
         if 'font-weight:bold' in style or 'font-weight: bold' in style:
             text = f'**{text}**'
@@ -875,11 +943,55 @@ def _convert_inserted_file(file_elem, ns, images: dict) -> str:
     return f'[[{ATTACHMENTS_FOLDER}/{filename}]]'
 
 
+_CODE_HINT_RE = re.compile(
+    r'(?:^|\s)(?:pip|mamba|conda|wget|curl|git|export|source|bash|python|npm|'
+    r'apt|sudo|chmod|mkdir|cd|ls|cat|echo|grep|docker|ssh|scp|make|cmake|'
+    r'jupyter|renv|Rscript)\b'
+    r'|\$\w'
+    r'|\$\('
+    r'|^\s*#\s+\S',
+    re.MULTILINE,
+)
+
+
+def _is_code_content(text: str) -> bool:
+    """Heuristic: does this text look like code/shell commands?"""
+    if not text.strip():
+        return False
+    lines = text.strip().split('\n')
+    hints = _CODE_HINT_RE.findall(text)
+    if len(lines) >= 2 and len(hints) >= 1:
+        return True
+    if len(hints) >= 2:
+        return True
+    return False
+
+
 def _convert_table(table_elem, ns) -> str:
-    """Convert OneNote table to markdown table."""
+    """Convert OneNote table to markdown table.
+
+    Detects single-cell tables used as code blocks and renders them
+    as fenced code blocks instead.
+    """
     rows = table_elem.findall('one:Row', ns)
     if not rows:
         return ''
+
+    # Detect single-cell tables (code blocks in OneNote)
+    if len(rows) == 1:
+        cells = rows[0].findall('one:Cell', ns)
+        non_empty_cells = []
+        for cell in cells:
+            texts = []
+            for t in cell.findall('.//one:T', ns):
+                if t.text:
+                    texts.append(_extract_cdata_text(t.text))
+            cell_text = '\n'.join(texts)
+            if cell_text.strip():
+                non_empty_cells.append(cell_text)
+        if len(non_empty_cells) == 1 and _is_code_content(non_empty_cells[0]):
+            code = non_empty_cells[0].strip()
+            return f'```\n{code}\n```'
 
     has_header = table_elem.get('hasHeaderRow', 'false') == 'true'
     md_rows = []
@@ -959,6 +1071,16 @@ def _split_frontmatter(markdown: str) -> tuple[str, str]:
 
 _MAX_WIKIFY_LENGTH = 200_000  # Skip wikification for pages over 200KB to prevent regex DoS
 
+_GENERIC_PAGE_NAMES = {
+    'research', 'other', 'general', 'todo', 'questions', 'summary',
+    'notes', 'overview', 'introduction', 'discussion', 'results',
+    'methods', 'background', 'conclusion', 'references', 'appendix',
+    'agenda', 'minutes', 'action', 'update', 'status', 'plan',
+    'clinical', 'data', 'analysis', 'review', 'report', 'template',
+}
+
+_DOUBLE_BRACKET_RE = re.compile(r'\[\[\[\[([^\[\]]+)\]\]\]\]')
+
 
 def _auto_wikify(markdown: str, all_page_names: set[str], current_page_name: str) -> str:
     """Replace mentions of other page names with [[wikilinks]] in body text."""
@@ -969,7 +1091,8 @@ def _auto_wikify(markdown: str, all_page_names: set[str], current_page_name: str
     # Sort names longest-first to avoid partial matches
     candidates = sorted(
         (name for name in all_page_names
-         if name != current_page_name and len(name) > 3),
+         if name != current_page_name and len(name) > 3
+         and name.lower() not in _GENERIC_PAGE_NAMES),
         key=len, reverse=True
     )
 
@@ -977,13 +1100,12 @@ def _auto_wikify(markdown: str, all_page_names: set[str], current_page_name: str
         return markdown
 
     # Split body into protected and unprotected segments
-    # Protected: code blocks (``` ... ```), inline code (` ... `),
-    #            existing wikilinks [[...]], markdown links [...](...)
+    # Protected: code blocks, inline code, existing wikilinks, markdown links
     protected_pattern = re.compile(
-        r'```[\s\S]*?```'       # fenced code blocks
-        r'|`[^`\n]+`'          # inline code
-        r'|\[\[[^\]]+\]\]'     # wikilinks
-        r'|\[[^\]]*\]\([^)]*\)'  # markdown links
+        r'```[\s\S]*?```'          # fenced code blocks
+        r'|`[^`\n]+`'             # inline code
+        r'|\[\[[^\[\]]+\]\]'      # wikilinks (no nested brackets)
+        r'|\[[^\]]*\]\([^)]*\)'   # markdown links
     )
 
     # Build segments: list of (text, is_protected)
@@ -1005,14 +1127,17 @@ def _auto_wikify(markdown: str, all_page_names: set[str], current_page_name: str
             if protected:
                 new_segments.append((text, True))
             else:
-                # Replace matches but preserve original case in the link display
-                def _make_link(match):
-                    return f'[[{name}]]'
+                def _make_link(match, _name=name):
+                    return f'[[{_name}]]'
                 new_text = pattern.sub(_make_link, text)
                 new_segments.append((new_text, False))
         segments = new_segments
 
     new_body = ''.join(text for text, _ in segments)
+
+    # Collapse any double brackets from re-wrapping already-wikified text
+    new_body = _DOUBLE_BRACKET_RE.sub(r'[[\1]]', new_body)
+
     return frontmatter + new_body
 
 
@@ -1100,7 +1225,7 @@ def _inject_entities(markdown: str, entities_dict: dict) -> str:
         closing_idx -= 1
 
     entity_lines = ['entities:']
-    for entity_type in ('genes', 'drugs', 'diseases', 'compounds', 'companies'):
+    for entity_type in ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles'):
         items = entities_dict.get(entity_type, [])
         if items:
             entity_lines.append(f'  {entity_type}:')
@@ -1113,6 +1238,63 @@ def _inject_entities(markdown: str, entities_dict: dict) -> str:
 
     new_frontmatter = '\n'.join(lines)
     return new_frontmatter + body
+
+
+def _wikify_entities(markdown: str, entities_dict: dict) -> str:
+    """Convert extracted entities to [[wikilinks]] in body text (native Obsidian mode)."""
+    if not entities_dict:
+        return markdown
+
+    frontmatter, body = _split_frontmatter(markdown)
+    if not body.strip():
+        return markdown
+
+    # Collect all entity names to wikify
+    entity_names = set()
+    for entity_type in ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles'):
+        for name in entities_dict.get(entity_type, []):
+            if len(name) > 2:
+                entity_names.add(name)
+
+    if not entity_names:
+        return markdown
+
+    # Protect existing wikilinks, code blocks, inline code, markdown links
+    protected_pattern = re.compile(
+        r'```[\s\S]*?```'
+        r'|`[^`\n]+`'
+        r'|\[\[[^\[\]]+\]\]'
+        r'|\[[^\]]*\]\([^)]*\)'
+    )
+
+    segments = []
+    last_end = 0
+    for m in protected_pattern.finditer(body):
+        if m.start() > last_end:
+            segments.append((body[last_end:m.start()], False))
+        segments.append((m.group(), True))
+        last_end = m.end()
+    if last_end < len(body):
+        segments.append((body[last_end:], False))
+
+    # Replace entity mentions longest-first
+    sorted_names = sorted(entity_names, key=len, reverse=True)
+    for name in sorted_names:
+        pattern = re.compile(r'\b' + re.escape(name) + r'\b', re.IGNORECASE)
+        new_segments = []
+        for text, protected in segments:
+            if protected:
+                new_segments.append((text, True))
+            else:
+                def _make_entity_link(match, _name=name):
+                    return f'[[{_name}]]'
+                new_text = pattern.sub(_make_entity_link, text)
+                new_segments.append((new_text, False))
+        segments = new_segments
+
+    new_body = ''.join(text for text, _ in segments)
+    new_body = _DOUBLE_BRACKET_RE.sub(r'[[\1]]', new_body)
+    return frontmatter + new_body
 
 
 # ============================================================================
@@ -1406,6 +1588,9 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
                         for company in llm_entities.get('companies', []):
                             tier2_result.companies.append(EntityMention(
                                 text=company, canonical=company, entity_type='company'))
+                        for role in llm_entities.get('roles', []):
+                            tier2_result.roles.append(EntityMention(
+                                text=role, canonical=role, entity_type='role'))
 
                         tier1_result.merge(tier2_result)
                         entities_dict = tier1_result.to_dict()
@@ -1427,7 +1612,10 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
                 if ai_tags:
                     markdown = _inject_ai_tags(markdown, ai_tags)
                 if entities_dict:
-                    markdown = _inject_entities(markdown, entities_dict)
+                    if args.dataview:
+                        markdown = _inject_entities(markdown, entities_dict)
+                    else:
+                        markdown = _wikify_entities(markdown, entities_dict)
 
             elif args.ai_tags:
                 from vision_ai.tagger import generate_tags
@@ -1472,7 +1660,10 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
                     }
 
                 if entities_dict:
-                    markdown = _inject_entities(markdown, entities_dict)
+                    if args.dataview:
+                        markdown = _inject_entities(markdown, entities_dict)
+                    else:
+                        markdown = _wikify_entities(markdown, entities_dict)
 
         except ImportError as e:
             print(f'\n  [!] Entity/tag dependencies not available: {e}')
@@ -1713,8 +1904,8 @@ Write-Output "DONE"
             execute_actions(actions, state, args, temp_dir, page_id_map, all_page_names)
             save_sync_state(state, args.output_dir)
 
-            # Entity index generation (after all pages processed)
-            if not args.no_entity_index and not args.dry_run:
+            # Entity index generation (only in --dataview mode)
+            if args.dataview and not args.no_entity_index and not args.dry_run:
                 try:
                     from entities.index_generator import generate_entity_index
                     print('\n[Post-sync] Generating entity index...')

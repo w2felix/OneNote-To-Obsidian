@@ -26,8 +26,9 @@ def _sanitize_ai_content(content: str) -> str:
 
 
 def sanitize_filename(name: str, max_length: int = 120) -> str:
-    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', name)
-    name = name.strip('. ')
+    name = re.sub(r'[<>:"/\\|?*#\[\]\x00-\x1f]', '_', name)
+    name = re.sub(r'_+', '_', name)
+    name = name.strip('._ ')
     return name[:max_length] if name else 'unnamed'
 
 
@@ -39,9 +40,12 @@ def generate_ai_note_filename(group) -> str:
 
     first_hash = Path(group.filenames[0]).stem[:8]
     if group.context:
-        ctx_slug = sanitize_filename(group.context.split('\n')[0].strip()[:30])
-        ctx_slug = re.sub(r'\s+', '_', ctx_slug).lower()
-        return f"{group.worker_type}_{ctx_slug}_{first_hash}_ai.md"
+        ctx_raw = group.context.split('\n')[0].strip().lstrip('#').strip()
+        ctx_raw = re.sub(r'\[\[([^\]]+)\]\]', r'\1', ctx_raw)
+        ctx_slug = sanitize_filename(ctx_raw[:30])
+        ctx_slug = re.sub(r'\s+', '_', ctx_slug).strip('_').lower()
+        if ctx_slug:
+            return f"{group.worker_type}_{ctx_slug}_{first_hash}_ai.md"
     return f"{group.worker_type}_{first_hash}_ai.md"
 
 
@@ -97,6 +101,8 @@ def _build_frontmatter(result: AnalysisResult, group, model: str = None) -> str:
     if group.context:
         ctx_escaped = group.context.split('\n')[0].strip()
         lines.append(f'context: {_yaml_escape(ctx_escaped)}')
+    lines.append('cssclasses:\n  - ai-generated')
+    lines.append('graph_exclude: true')
 
     lines.append('---')
     return '\n'.join(lines)
@@ -124,10 +130,22 @@ def inject_callout_links(page_md_path: Path, groups_and_filenames: list[tuple]):
     """Inject Obsidian callout links for all groups in a single read/write pass."""
     md_text = page_md_path.read_text(encoding='utf-8')
 
+    md_text = _remove_broken_callouts(md_text)
+
     for group, ai_note_filename in groups_and_filenames:
         md_text = _inject_single_callout(md_text, group, ai_note_filename, page_md_path.name)
 
     page_md_path.write_text(md_text, encoding='utf-8')
+
+
+_BROKEN_CALLOUT_RE = re.compile(
+    r'\n\n> \[!ai\]- AI Analysis[^\n]*\n> !\[\[_ai_notes/[^\]]*[#\[\]][^\]]*\]\](?:\n|$)',
+)
+
+
+def _remove_broken_callouts(md_text: str) -> str:
+    """Remove callout blocks whose AI note filenames contain #, [, or ]."""
+    return _BROKEN_CALLOUT_RE.sub('\n', md_text)
 
 
 def _find_embed_position(md_text: str, filename: str) -> int | None:

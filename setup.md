@@ -1,24 +1,20 @@
 # Setup Guide
 
-Complete installation instructions for OneNote to Obsidian Sync.
+Step-by-step installation for OneNote to Obsidian Sync.
 
 ---
 
 ## Step 1: Install Miniconda
 
-### Download
+> Miniconda can be installed without admin rights — select "Just Me" during installation.
 
-1. Go to https://docs.conda.io/en/latest/miniconda.html
-2. Download **Miniconda3 Windows 64-bit**
-3. Run the installer
+1. Download [Miniconda3 Windows 64-bit](https://docs.conda.io/en/latest/miniconda.html)
+2. Run the installer:
+   - Install for: **Just Me**
+   - Location: default (`C:\Users\YourName\miniconda3`)
+   - Add to PATH: check the box (optional but convenient)
 
-### Installation
-
-- Install for: Just Me (recommended)
-- Location: Default (`C:\Users\YourName\miniconda3`)
-- Add to PATH: ☑ (optional but recommended)
-
-### Verify
+Verify:
 
 ```bash
 conda --version
@@ -27,78 +23,71 @@ conda --version
 
 ---
 
-## Step 2: Create Conda Environment
+## Step 2: Create Environment
 
 ```bash
-# Create environment with Python 3.11
 conda create -n ds_env python=3.11 -y
-
-# Activate
 conda activate ds_env
-
-# Verify
 python --version
 # Should output: Python 3.11.x
 ```
 
 ---
 
-## Step 3: Install Everything
+## Step 3: Run Setup Script
 
-Run the setup script — it installs all pip packages, conda packages (pandas, openpyxl, Tesseract), downloads the entity ontology files, and builds the lookup dictionaries in one go:
+The setup script installs all packages, Tesseract OCR, and builds entity dictionaries:
 
 ```bash
 conda activate ds_env
 python setup.py
 ```
 
-This takes a few minutes (downloads ~115 MB of ontology data). When it finishes it prints a verification summary.
+This takes a few minutes (downloads ~115 MB of ontology data). It prints a verification summary when done.
 
-**Options:**
+**Other options:**
 
 ```bash
-# Re-download and rebuild entity ontologies (updated monthly)
+# Re-download ontologies (updated monthly)
 python setup.py --update-entities
 
-# Skip package installation (only refresh entity dictionaries)
+# Only refresh entity dictionaries (skip package install)
 python setup.py --skip-packages --update-entities
-```
 
-> If you are not inside a conda environment, Tesseract cannot be installed automatically. The script will install the remaining packages via pip and print manual Tesseract install instructions.
+# Set up Tesseract separately (see below)
+python setup.py --setup-tesseract
+```
 
 ---
 
 ## Step 4: Configure API Credentials
 
-Required for `--vision-ai` and `--ai-tags`. Set credentials as Windows User environment variables:
+Required only for `--vision-ai` and `--ai-tags`.
+
+**Corporate proxy setup:**
 
 ```powershell
-# Corporate proxy setup (ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL)
 [Environment]::SetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN", "your-token", "User")
 [Environment]::SetEnvironmentVariable("ANTHROPIC_BASE_URL", "https://your-proxy-url/api/proxy/anthropic", "User")
-
-# Verify
-[Environment]::GetEnvironmentVariable('ANTHROPIC_AUTH_TOKEN', 'User')
-[Environment]::GetEnvironmentVariable('ANTHROPIC_BASE_URL', 'User')
 ```
 
-If using the Anthropic API directly (no proxy), set `ANTHROPIC_API_KEY` instead:
+**Direct Anthropic API:**
 
 ```powershell
 [Environment]::SetEnvironmentVariable("ANTHROPIC_API_KEY", "sk-ant-...", "User")
 ```
 
-**IMPORTANT**: Restart your terminal after setting variables.
+Restart your terminal after setting variables.
 
 ---
 
-## Step 5: Verify OneNote is Ready
+## Step 5: OneNote
 
-The script uses PowerShell COM automation to talk to OneNote — no browser login or admin rights needed.
+The script uses COM automation — no browser login or admin rights needed.
 
-- Open **OneNote desktop app** and sign in
-- Confirm your notebooks are visible and synced
-- That's it — if OneNote shows your notebooks, the script can read them
+1. Open **OneNote desktop app** and sign in
+2. Confirm your notebooks are visible and synced
+3. Done — if OneNote shows your notebooks, the script can read them
 
 ---
 
@@ -106,12 +95,9 @@ The script uses PowerShell COM automation to talk to OneNote — no browser logi
 
 ```bash
 conda activate ds_env
-cd OneNote_To_Obsidian
-
-# Basic sync (exports all notebooks to obsidian_export/)
 python onenote_to_obsidian.py
 
-# Full AI pipeline (requires API credentials)
+# With AI features (requires API credentials)
 python onenote_to_obsidian.py --vision-ai --ai-tags
 ```
 
@@ -119,87 +105,128 @@ See the [README](README.md) for all CLI options.
 
 ---
 
-## Troubleshooting
+## Tesseract OCR (without admin rights)
 
-### Tesseract Not Found
+Tesseract is optional — it enables text extraction from screenshots. Without it, screenshot analysis still runs but can't read text in images.
 
-```powershell
-# Add Tesseract to PATH
-[Environment]::SetEnvironmentVariable("Path", $env:Path + ";C:\ProgramData\miniconda3\envs\ds_env\Library\bin", "User")
+### Option A: Automatic (conda)
 
-# Restart terminal, then verify
+If you're using conda, setup.py installs Tesseract automatically:
+
+```bash
+conda activate ds_env
+python setup.py
+```
+
+### Option B: Manual download (no admin rights)
+
+Use this if you don't have conda or if the conda install didn't work.
+
+**Step 1 — Download:**
+
+```bash
+python setup.py --setup-tesseract
+```
+
+This downloads the installer to your temp folder and walks you through the setup.
+
+**Step 2 — Install for current user:**
+
+When the installer opens:
+- Select **"Install for current user only"**
+- Set install location to: `%LOCALAPPDATA%\Programs\Tesseract-OCR`
+  (typically `C:\Users\YourName\AppData\Local\Programs\Tesseract-OCR`)
+- Complete the installation
+
+**Step 3 — Verify:**
+
+The setup script automatically adds Tesseract to your User PATH. Restart your terminal, then:
+
+```bash
 tesseract --version
 ```
 
-### API Credentials Not Working
+### Option C: Manual extraction with 7-Zip (fully portable, no installer)
+
+If you can't run the installer at all:
+
+1. Download the installer `.exe` from [UB-Mannheim releases](https://github.com/UB-Mannheim/tesseract/wiki)
+2. Right-click the `.exe` → **7-Zip** → **Extract to folder**
+3. Copy the extracted folder to:
+   ```
+   %LOCALAPPDATA%\Programs\Tesseract-OCR
+   ```
+4. Tell setup.py where it is:
+   ```bash
+   python setup.py --tesseract-path "%LOCALAPPDATA%\Programs\Tesseract-OCR"
+   ```
+   This configures PATH and TESSDATA_PREFIX automatically.
+
+### Option D: Point to existing installation
+
+If Tesseract is already installed somewhere:
+
+```bash
+python setup.py --tesseract-path "C:\path\to\Tesseract-OCR"
+```
+
+---
+
+## Troubleshooting
+
+### Tesseract not found
+
+```bash
+# Re-run Tesseract setup
+python setup.py --setup-tesseract
+
+# Or point to an existing installation
+python setup.py --tesseract-path "C:\path\to\Tesseract-OCR"
+```
+
+If the PATH was set but the terminal doesn't find it: **restart your terminal** (PATH changes require a new shell session).
+
+### API credentials not working
 
 ```powershell
 # Check current values
 [Environment]::GetEnvironmentVariable('ANTHROPIC_AUTH_TOKEN', 'User')
 [Environment]::GetEnvironmentVariable('ANTHROPIC_BASE_URL', 'User')
-
-# Re-set if empty
-[Environment]::SetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN", "your-token", "User")
-[Environment]::SetEnvironmentVariable("ANTHROPIC_BASE_URL", "https://your-proxy-url/api/proxy/anthropic", "User")
-
-# MUST restart terminal after changes
 ```
 
-### OneNote COM Error
+Restart your terminal after any changes.
+
+### OneNote COM error
 
 - Make sure OneNote desktop app is installed and open
 - Sign in and wait for notebooks to fully sync
-- Run the script from a regular terminal (not elevated/admin)
+- Run from a regular terminal (not elevated/admin)
 
-### Package Import Errors
+### Package import errors
 
 ```bash
-# Verify environment is active
 conda activate ds_env
 where python
 # Should show: C:\Users\YourName\miniconda3\envs\ds_env\python.exe
 
-# Reinstall a package
-conda install -c conda-forge <package-name> -y
-# or
-pip install <package-name>
+# Reinstall a specific package
+pip install --upgrade <package-name>
 ```
 
-### Entity Dictionaries Missing
+### Entity dictionaries missing
 
 ```bash
-# Re-run setup (skips package install, only refreshes dictionaries)
 python setup.py --skip-packages
 ```
 
 ---
 
-## Installation Checklist
+## Checklist
 
-- [ ] Install Miniconda
-- [ ] Create `ds_env` environment (Python 3.11)
-- [ ] Run `python setup.py` (installs packages, Tesseract, and entity dictionaries)
-- [ ] Set `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL` (or `ANTHROPIC_API_KEY`)
+- [ ] Install Miniconda (no admin — "Just Me")
+- [ ] Create `ds_env` environment
+- [ ] Run `python setup.py`
+- [ ] Set API credentials (if using AI features)
 - [ ] Restart terminal
-- [ ] Open OneNote desktop app and confirm notebooks are synced
-- [ ] Run `python onenote_to_obsidian.py` to verify everything works
-
----
-
-## Package Reference
-
-| Package | Purpose | Install |
-|---------|---------|---------|
-| defusedxml | Safe XML parsing (OneNote export) | `pip install defusedxml` |
-| beautifulsoup4 | HTML/XML content parsing | `pip install beautifulsoup4` |
-| anthropic | Claude API client (Vision AI + tags) | `pip install anthropic` |
-| pymupdf (fitz) | PDF rendering to images | `conda install -c conda-forge pymupdf` |
-| pillow | Image processing | `conda install -c conda-forge pillow` |
-| pdfplumber | PDF text extraction | `conda install -c conda-forge pdfplumber` |
-| python-pptx | PPTX text/slide extraction | `pip install python-pptx` |
-| python-docx | DOCX text extraction | `pip install python-docx` |
-| pandas | Tabular data reading | `conda install pandas` |
-| openpyxl | Excel file support | `conda install openpyxl` |
-| tabulate | Markdown table formatting | `pip install tabulate` |
-| pytesseract | OCR interface (Tesseract) | `conda install -c conda-forge pytesseract` |
-| PyYAML | YAML file parsing (entity data) | `pip install PyYAML` |
+- [ ] Open OneNote and confirm notebooks are synced
+- [ ] Run `python onenote_to_obsidian.py`

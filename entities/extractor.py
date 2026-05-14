@@ -96,10 +96,11 @@ class EntityResult:
     diseases: list[EntityMention] = field(default_factory=list)
     compounds: list[EntityMention] = field(default_factory=list)
     companies: list[EntityMention] = field(default_factory=list)
+    roles: list[EntityMention] = field(default_factory=list)
 
     def is_empty(self) -> bool:
         return not (self.genes or self.drugs or self.diseases
-                    or self.compounds or self.companies)
+                    or self.compounds or self.companies or self.roles)
 
     def merge(self, other: 'EntityResult'):
         """Merge another EntityResult, deduplicating by canonical name."""
@@ -108,6 +109,7 @@ class EntityResult:
         existing_diseases = {m.canonical for m in self.diseases}
         existing_compounds = {m.canonical for m in self.compounds}
         existing_companies = {m.canonical for m in self.companies}
+        existing_roles = {m.canonical for m in self.roles}
 
         for m in other.genes:
             if m.canonical not in existing_genes:
@@ -129,6 +131,10 @@ class EntityResult:
             if m.canonical not in existing_companies:
                 self.companies.append(m)
                 existing_companies.add(m.canonical)
+        for m in other.roles:
+            if m.canonical not in existing_roles:
+                self.roles.append(m)
+                existing_roles.add(m.canonical)
 
     def to_dict(self) -> dict:
         """Serialize for YAML frontmatter and caching."""
@@ -143,6 +149,8 @@ class EntityResult:
             result['compounds'] = sorted(set(m.canonical for m in self.compounds))
         if self.companies:
             result['companies'] = sorted(set(m.canonical for m in self.companies))
+        if self.roles:
+            result['roles'] = sorted(set(m.canonical for m in self.roles))
         return result
 
 
@@ -348,6 +356,49 @@ def _extract_companies(text: str, dicts: EntityDictionaries) -> list[EntityMenti
     return mentions
 
 
+ROLE_TITLES = [
+    'Executive Director', 'Associate Director', 'Senior Director',
+    'Principal Scientist', 'Senior Scientist', 'Research Associate',
+    'Senior Vice President', 'Vice President',
+    'Project Manager', 'Group Leader', 'Team Lead',
+    'Work Student', 'Werkstudent', 'Praktikant', 'Internship', 'Intern',
+    'Head of',
+    'SVP', 'CEO', 'COO', 'CTO', 'CFO', 'CSO', 'CMO',
+    'Director',
+]
+
+# Pre-sorted longest-first so "Senior Director" matches before "Director"
+ROLE_TITLES.sort(key=len, reverse=True)
+
+_role_patterns = [(title, re.compile(r'\b' + re.escape(title) + r'\b', re.IGNORECASE))
+                  for title in ROLE_TITLES]
+
+
+def _extract_roles(text: str) -> list[EntityMention]:
+    """Extract organizational role/title mentions."""
+    mentions = []
+    seen = set()
+
+    for title, pattern in _role_patterns:
+        if pattern.search(text):
+            canonical = title
+            if canonical in seen:
+                continue
+            # "Director" alone should not match if a more specific variant was already found
+            if canonical == 'Director' and any(
+                d in seen for d in ('Executive Director', 'Associate Director', 'Senior Director')
+            ):
+                continue
+            seen.add(canonical)
+            mentions.append(EntityMention(
+                text=title,
+                canonical=canonical,
+                entity_type='role',
+            ))
+
+    return mentions
+
+
 def extract_entities(text: str, dicts: EntityDictionaries | None = None) -> EntityResult:
     """Extract all entity types from text using dictionary/regex matching (Tier 1).
 
@@ -367,4 +418,5 @@ def extract_entities(text: str, dicts: EntityDictionaries | None = None) -> Enti
         diseases=_extract_diseases(text, dicts),
         drugs=[],  # Drugs come from LLM (Tier 2) — no curated drug dictionary
         companies=_extract_companies(text, dicts),
+        roles=_extract_roles(text),
     )

@@ -15,17 +15,53 @@ def _check_tesseract():
         return _tesseract_available
     try:
         import pytesseract
-        conda_prefix = os.environ.get('CONDA_PREFIX')
-        if conda_prefix and not os.environ.get('TESSDATA_PREFIX'):
-            tessdata_dir = os.path.join(conda_prefix, 'Library', 'share', 'tessdata')
-            if os.path.exists(tessdata_dir):
-                os.environ['TESSDATA_PREFIX'] = tessdata_dir
+
+        # Auto-detect Tesseract in common locations
+        _configure_tesseract_path(pytesseract)
+
         pytesseract.get_tesseract_version()
         _tesseract_available = True
     except Exception:
         _tesseract_available = False
         logger.debug("Tesseract not available, OCR pre-pass will be skipped")
     return _tesseract_available
+
+
+def _configure_tesseract_path(pytesseract):
+    """Set pytesseract.tesseract_cmd and TESSDATA_PREFIX if not already in PATH."""
+    # Try conda environment first
+    conda_prefix = os.environ.get('CONDA_PREFIX')
+    if conda_prefix and not os.environ.get('TESSDATA_PREFIX'):
+        tessdata_dir = os.path.join(conda_prefix, 'Library', 'share', 'tessdata')
+        if os.path.exists(tessdata_dir):
+            os.environ['TESSDATA_PREFIX'] = tessdata_dir
+
+    # If tesseract is already findable, nothing to do
+    from pathlib import Path
+    import subprocess
+    result = subprocess.run(
+        ['tesseract', '--version'], capture_output=True, text=True)
+    if result.returncode == 0:
+        return
+
+    # Search common no-admin-install locations
+    search_paths = [
+        Path(os.environ.get('LOCALAPPDATA', '')) / 'Programs' / 'Tesseract-OCR',
+        Path(r'C:\Program Files\Tesseract-OCR'),
+        Path(r'C:\Program Files (x86)\Tesseract-OCR'),
+    ]
+    if conda_prefix:
+        search_paths.insert(0, Path(conda_prefix) / 'Library' / 'bin')
+
+    for search_path in search_paths:
+        candidate = search_path / 'tesseract.exe'
+        if candidate.exists():
+            pytesseract.tesseract_cmd = str(candidate)
+            tessdata = search_path / 'tessdata'
+            if tessdata.exists() and not os.environ.get('TESSDATA_PREFIX'):
+                os.environ['TESSDATA_PREFIX'] = str(tessdata)
+            logger.debug(f"Found Tesseract at: {candidate}")
+            return
 
 
 def ocr_image(image) -> str:

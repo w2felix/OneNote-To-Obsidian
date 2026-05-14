@@ -33,6 +33,7 @@ def generate_entity_index(output_dir: Path, state: dict):
         'diseases': {},
         'compounds': {},
         'companies': {},
+        'roles': {},
     }
 
     for page_key, page_data in entities_state.items():

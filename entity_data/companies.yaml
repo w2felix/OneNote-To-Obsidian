@@ -1,0 +1,152 @@
+# Pharma/biotech/diagnostics companies for Tier 1 entity extraction
+# Format: canonical_name: [list of variant spellings (lowercase)]
+
+Merck:
+  - merck
+  - "merck kgaa"
+  - merckgroup
+
+Tempus:
+  - tempus
+  - "tempus ai"
+  - "tempus labs"
+
+Caris:
+  - caris
+  - "caris life sciences"
+
+Roche:
+  - roche
+  - "f. hoffmann-la roche"
+  - genentech
+
+AstraZeneca:
+  - astrazeneca
+  - "astra zeneca"
+
+Novartis:
+  - novartis
+  - "novartis pharma"
+
+Pfizer:
+  - pfizer
+
+Bristol-Myers Squibb:
+  - "bristol-myers squibb"
+  - "bristol myers squibb"
+  - bms
+
+Eli Lilly:
+  - "eli lilly"
+  - lilly
+
+Johnson & Johnson:
+  - "johnson & johnson"
+  - "johnson and johnson"
+  - janssen
+
+Sanofi:
+  - sanofi
+  - "sanofi aventis"
+
+Amgen:
+  - amgen
+
+Gilead:
+  - gilead
+  - "gilead sciences"
+
+AbbVie:
+  - abbvie
+
+Regeneron:
+  - regeneron
+
+Daiichi Sankyo:
+  - "daiichi sankyo"
+  - daiichi
+
+Seagen:
+  - seagen
+
+Takeda:
+  - takeda
+
+Bayer:
+  - bayer
+  - "bayer pharma"
+
+Boehringer Ingelheim:
+  - "boehringer ingelheim"
+  - boehringer
+
+GSK:
+  - gsk
+  - glaxosmithkline
+  - "glaxo smithkline"
+
+Moderna:
+  - moderna
+
+BioNTech:
+  - biontech
+
+Illumina:
+  - illumina
+
+Foundation Medicine:
+  - "foundation medicine"
+  - foundationone
+
+Guardant Health:
+  - "guardant health"
+  - guardant
+
+Myriad Genetics:
+  - "myriad genetics"
+  - myriad
+
+NeoGenomics:
+  - neogenomics
+
+Ventana:
+  - ventana
+  - "ventana medical systems"
+
+Agilent:
+  - agilent
+  - "agilent technologies"
+
+10x Genomics:
+  - "10x genomics"
+
+Incyte:
+  - incyte
+
+Springworks:
+  - springworks
+  - "springworks therapeutics"
+
+Mirati:
+  - mirati
+  - "mirati therapeutics"
+
+Genome & Company:
+  - "genome & company"
+  - "genome and company"
+
+GenomeOncology:
+  - genomeoncology
+  - "genome oncology"
+
+Tacylix:
+  - tacylix
+
+Memorial Sloan Kettering Cancer Center:
+  - "memorial sloan kettering"
+  - mskcc
+  - "sloan kettering"
+
+Sarah Cannon Research Institute:
+  - "sarah cannon research institute"
+  - "sarah cannon"

@@ -1,109 +1,84 @@
 # OneNote to Obsidian Sync
 
-A Python script that exports your OneNote notebooks to Obsidian-compatible Markdown files — and keeps them in sync on subsequent runs. Optionally enriches pages with AI-generated analysis, semantic tags, and cross-page wikilinks.
+Exports OneNote notebooks to Obsidian-compatible Markdown and keeps them in sync on subsequent runs. Optionally enriches pages with AI analysis, semantic tags, and entity linking.
 
-Built for environments where the Obsidian OneNote plugin can't be used (e.g. corporate setups without admin/OAuth access).
+Built for corporate setups where the Obsidian OneNote plugin can't be used (no admin/OAuth access needed).
 
 ## Requirements
 
 - **Windows** with OneNote desktop app installed and logged in
-- **Python 3.10+**
+- **Python 3.10+** (recommended: [Miniconda](https://docs.conda.io/en/latest/miniconda.html))
+
+Run the setup script to install everything:
 
 ```bash
-# Core dependencies
-pip install defusedxml beautifulsoup4
-
-# Optional: Vision AI + AI tags (only needed with --vision-ai or --ai-tags)
-pip install anthropic pymupdf pillow pdfplumber python-pptx python-docx pandas tabulate openpyxl pytesseract
+python setup.py
 ```
 
-> The script uses PowerShell COM automation to talk to OneNote. No browser login or admin rights needed — if OneNote opens and shows your notebooks, you're good.
+This installs all Python packages, Tesseract OCR, and builds the entity dictionaries. See [setup.md](setup.md) for detailed step-by-step instructions.
 
-For Vision AI / AI tags, set the `ANTHROPIC_API_KEY` environment variable (or configure your proxy in `vision_ai/client.py`).
-
-**Tesseract OCR** (optional) — needed for text extraction from screenshots. `pytesseract` (listed above) is the Python binding, but the Tesseract binary must also be installed separately. With conda: `conda install tesseract`. Without it, screenshot analysis still runs but skips OCR.
+For AI features (`--vision-ai`, `--ai-tags`), set the `ANTHROPIC_API_KEY` environment variable. See [setup.md](setup.md#step-4-configure-api-credentials) for details.
 
 ## Quick Start
 
 ```bash
-# Export everything (first run = full export, subsequent runs = incremental sync)
-# Entity extraction runs automatically if dictionaries are built (see below)
+# Export everything (first run = full export, later runs = incremental sync)
 python onenote_to_obsidian.py
 
-# Add Vision AI analysis of attachments + AI semantic tags
+# With AI analysis and semantic tags
 python onenote_to_obsidian.py --vision-ai --ai-tags
 
-# Skip entity extraction for a faster run
-python onenote_to_obsidian.py --no-entities
+# Only sync specific notebooks
+python onenote_to_obsidian.py --notebooks "Work" "Personal"
+
+# Preview changes without writing anything
+python onenote_to_obsidian.py --dry-run
 ```
 
 This creates an `obsidian_export/` folder you can open directly as an Obsidian vault.
 
-## Options
-
-### Basic
+## CLI Options
 
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--output-dir PATH` | Where to write the vault | `./obsidian_export` |
-| `--notebooks "Name1" "Name2"` | Only sync specific notebooks (exact names as in OneNote) | All notebooks |
-| `--vault-mode single\|multi` | `single` = all notebooks in one vault. `multi` = each notebook as a separate vault folder | `single` |
-| `--skip-images` | Skip images and file attachments (text-only export) | Off |
-
-### Sync Control
-
-| Flag | Description |
-|------|-------------|
-| `--dry-run` | Preview what would change without writing anything |
-| `--force-reexport` | Re-export pages previously deleted from the vault |
-| `--force-reconvert onenote` | Overwrite all local files with fresh OneNote export — **any manual edits in Obsidian will be lost** |
-| `--force-reconvert obsidian` | Accept current vault as baseline without touching files |
-
-### AI Features
-
-| Flag | Description |
-|------|-------------|
-| `--vision-ai` | Analyze embedded images, PDFs, and data files with Claude Vision. Creates `_ai_notes/` with linked summaries |
-| `--vision-ai-force` | Re-analyze attachments even if previously cached |
-| `--ai-tags` | Ask Claude "what is this page *about*?" — generates 3-7 thematic topic tags per page (e.g. `oncology`, `clinical-trials`). Tags go into YAML `tags:` alongside existing OneNote tags |
-| `--ai-tags-force` | Re-tag pages even if content hasn't changed |
-| `--no-entities` | Skip biomedical entity extraction (runs by default when dictionaries are built — see below) |
-| `--entities-force` | Re-extract entities even if content hasn't changed |
-| `--no-entity-index` | Skip entity index generation (runs by default alongside entity extraction) |
-
-> **Tags vs. entities:** `--ai-tags` describes *what a page is about* (broad topics). Entity extraction records *what is mentioned in a page* (specific names). A page tagged `oncology` might have entities `EGFR`, `NSCLC`, `pembrolizumab`. The two are independent and complement each other.
+| `--notebooks "Name1" "Name2"` | Only sync specific notebooks | All notebooks |
+| `--vault-mode single\|multi` | `single` = one vault; `multi` = one vault per notebook | `single` |
+| `--skip-images` | Text-only export (no images or file attachments) | Off |
+| `--dry-run` | Preview what would change without writing | |
+| `--force-reexport` | Re-export pages previously deleted from the vault | |
+| `--force-reconvert onenote` | Overwrite all local files with fresh OneNote export | |
+| `--force-reconvert obsidian` | Accept current vault files as baseline | |
+| `--vision-ai` | Analyze images, PDFs, and data files with Claude | |
+| `--vision-ai-force` | Re-analyze even if previously cached | |
+| `--ai-tags` | Generate 3–7 semantic topic tags per page with Claude | |
+| `--ai-tags-force` | Re-tag even if content hasn't changed | |
+| `--no-entities` | Skip entity extraction | |
+| `--entities-force` | Re-extract entities even if content hasn't changed | |
+| `--dataview` | Write entities to YAML frontmatter + generate entity index pages (requires [Dataview](https://github.com/blacksmithgu/obsidian-dataview) plugin). Default: entities are native `[[wikilinks]]` | |
+| `--no-entity-index` | Skip entity index generation (only with `--dataview`) | |
 
 ### Examples
 
 ```bash
-# Only sync two notebooks
-python onenote_to_obsidian.py --notebooks "Work" "Personal"
-
-# Preview changes without writing
-python onenote_to_obsidian.py --dry-run
-
-# Re-export with improved conversion after script update
+# Re-export everything after a script update
 python onenote_to_obsidian.py --force-reconvert onenote
 
-# Run Vision AI on a specific notebook
-python onenote_to_obsidian.py --notebooks "Research" --vision-ai
+# Full AI pipeline with Dataview integration
+python onenote_to_obsidian.py --vision-ai --ai-tags --dataview
 
-# Generate semantic tags for all pages (also unlocks drug name extraction via Tier 2)
-python onenote_to_obsidian.py --ai-tags
-
-# Full AI pipeline: Vision AI + semantic tags + entity extraction
-python onenote_to_obsidian.py --vision-ai --ai-tags
-
-# Skip entity extraction for a faster run
-python onenote_to_obsidian.py --no-entities
-
-# Re-extract entities for all pages (e.g. after updating ontologies)
+# Re-extract entities after updating ontology files
 python onenote_to_obsidian.py --entities-force
+
+# Fast run — skip entities entirely
+python onenote_to_obsidian.py --no-entities
 ```
 
 ## Features
 
 ### Incremental Sync
+
+After the first full export, only changed pages are updated:
 
 | Scenario | What happens |
 |----------|-------------|
@@ -117,171 +92,115 @@ Sync state is tracked in `.sync_state.json` inside the output folder.
 
 ### Auto-Wikilinks
 
-On every export, the script detects mentions of other page names in body text and converts them to `[[wikilinks]]`. This runs automatically on every export (there is no flag to disable it) and respects code blocks, existing links, and frontmatter. Unresolvable `onenote://` links are preserved as plain text with a `*(unresolved OneNote link)*` annotation.
+The script detects mentions of other page names in body text and converts them to `[[wikilinks]]`. This builds a connected knowledge graph automatically. Generic single-word page names ("Research", "General", "Summary") are excluded to avoid noise. Code blocks, existing links, and frontmatter are left untouched.
 
-### OneNote Tags and Checkboxes
+### Code Block Detection
 
-OneNote tags are automatically converted to Obsidian YAML tags (lowercase, hyphenated). OneNote checkboxes become `[ ]` / `[x]` Markdown task items. Both are handled transparently — no flags needed.
+Text in monospace fonts (Consolas, Courier, etc.) is automatically rendered as fenced code blocks. Single-cell tables containing shell commands or code are also detected and converted.
+
+### Tags and Checkboxes
+
+OneNote tags become Obsidian YAML `tags:` (lowercase, hyphenated). OneNote checkboxes become `[ ]` / `[x]` task items. Both are automatic — no flags needed.
 
 ### YAML Frontmatter
 
-Every exported page gets a YAML frontmatter block populated from OneNote metadata:
+Every page gets metadata from OneNote:
 
 | Field | Description |
 |-------|-------------|
-| `tags` | OneNote tags + AI-generated tags (if `--ai-tags`) |
-| `entities` | Extracted entities (if `--entities`) |
-| `author` | Page creator from OneNote |
-| `contributors` | Other editors from OneNote |
+| `tags` | OneNote tags + AI tags (if `--ai-tags`) |
+| `entities` | Extracted entities (only with `--dataview`) |
+| `author` | Page creator |
+| `contributors` | Other editors |
 | `last_modified_by` | Last editor |
 | `last_modified_at` | Last modification timestamp |
-| `parent` | Parent page name (for sub-pages) |
-| `children` | List of child page names |
+| `parent` / `children` | Page hierarchy links |
 
-These fields are queryable via Obsidian's [Dataview](https://github.com/blacksmithgu/obsidian-dataview) plugin.
+These fields are queryable via the [Dataview](https://github.com/blacksmithgu/obsidian-dataview) plugin.
 
 ### Vision AI (`--vision-ai`)
 
-Analyzes embedded attachments using Claude's vision and text models. Each page's `_attachments/` folder is scanned, content types are auto-detected, and specialized workers generate markdown summaries.
+Analyzes embedded attachments using Claude and writes linked summaries to `_ai_notes/` folders. Content types are auto-detected:
 
-**Supported content types:**
+| Type | Output |
+|------|--------|
+| Slide photos | Speaker/topic extraction, key points |
+| Screenshots | Content description + OCR text extraction |
+| Diagrams | Structure description, entity relationships |
+| Posters | Title, authors, key findings |
+| Documents (PDF, DOCX) | Summary, key sections |
+| Presentations (PPTX) | Slide-by-slide extraction |
+| Tabular data (XLSX, CSV) | Schema + AI interpretation |
 
-| Type | Detection | Output |
-|------|-----------|--------|
-| Slide photos | Groups of landscape images | Speaker/topic extraction, key points per slide |
-| Screenshots | UI captures, app interfaces | Content description, text extraction via OCR |
-| Diagrams | Org charts, pipelines, flowcharts | Structure description, entity relationships |
-| Posters | Conference posters (PDF or image) | Title, authors, key findings, methods |
-| Documents | PDFs, DOCX, HTML files | Summary, key sections, conclusions |
-| Presentations | PPTX, landscape PDFs | Slide-by-slide content extraction |
-| Tabular data | XLSX, CSV, TSV files | Schema table + AI interpretation |
-| Histology slides | IHC/IF/H&E staining images | Staining type, markers, tissue morphology |
+Results are cached by content hash — unchanged files are never re-analyzed.
 
-Results are written to `_ai_notes/` folders and linked from the parent page via Obsidian callout blocks:
+AI notes include `cssclasses: [ai-generated]` and `graph_exclude: true` in their frontmatter. To hide them from the Obsidian graph: Settings > Files & Links > Excluded files > add `_ai_notes/`.
 
-```markdown
-> [!ai]- AI Analysis — Slide Photo — Dr. Smith Keynote (12 files)
-> ![[_ai_notes/slide_photo_abc123_ai.md]]
-```
+### AI Tags (`--ai-tags`)
 
-Analysis is cached by content hash — unchanged files are never re-analyzed.
+Generates 3–7 thematic topic tags per page (e.g. `clinical-trials`, `gitlab`, `single-cell`). Tags describe *what a page is about* and are merged into the YAML `tags:` field. Pages with fewer than 50 words are skipped.
 
-### AI Semantic Tags (`--ai-tags`)
+### Entity Extraction
 
-Asks Claude *"what is this page about?"* and generates 3–7 thematic topic tags per page (skips pages with fewer than 50 words). Tags are lowercase-hyphenated and merged into the YAML `tags:` field alongside existing OneNote tags — useful for browsing and filtering by topic in Obsidian.
+Runs automatically once dictionaries are built (see [Setup](setup.md)). Finds specific things *mentioned* in each page:
 
-```yaml
----
-tags:
-  - existing-onenote-tag
-  - antibody-drug-conjugates
-  - clinical-trials
-  - oncology
----
-```
+| Entity Type | Example |
+|---|---|
+| Genes/Proteins | EGFR, KRAS, PD-L1 |
+| Diseases | NSCLC, melanoma |
+| Companies | Tempus, Caris, Merck |
+| Roles | Principal Scientist, Director |
+| Internal compounds | M1774, M3814 |
+| Drugs (requires `--ai-tags`) | pembrolizumab, osimertinib |
 
-Cached by content hash — pages are only re-tagged when content changes (or with `--ai-tags-force`).
+Local dictionary matching finds genes, diseases, companies, roles, and compounds without any API calls. When `--ai-tags` is used, drugs, companies, and roles are additionally extracted by Claude at no extra cost (piggybacked on the same API call).
 
-### Biomedical Entity Extraction (on by default · `--no-entities` to skip)
+**Default mode:** entities become `[[wikilinks]]` in body text — Obsidian's backlinks panel shows all pages mentioning each entity.
 
-Where `--ai-tags` describes *what a page is about*, entity extraction records *what is specifically mentioned in it* — gene names, disease names, drug names, and internal compound codes. These are extracted into a separate `entities:` block in YAML frontmatter and are independent of tags.
-
-Entity extraction runs automatically on every sync **once the dictionaries are built** (one-time setup, see below). If the dictionaries aren't found, the script warns and continues without them. Use `--no-entities` to skip it explicitly.
-
-**What gets extracted:**
-
-| Entity Type | Source | Example |
-|---|---|---|
-| Genes/Proteins | HGNC ontology (44,986 approved symbols) | EGFR, KRAS, PD-L1 |
-| Diseases | MONDO ontology (31,817 diseases + 81K synonyms) | NSCLC, melanoma, AML |
-| Internal compounds | Regex `M[0-9]{4}` + mapping YAML | M1774, M3814 |
-| Drugs | LLM-extracted (only when combined with `--ai-tags`) | pembrolizumab, osimertinib |
-
-**Two-tier extraction:**
-- **Tier 1 (local, ~5ms/page):** Regex + dictionary matching against HGNC and MONDO. Runs with `--entities` alone — no API calls, no cost.
-- **Tier 2 (LLM, piggybacked on `--ai-tags`):** When both flags are used together, the existing Claude API call is extended to also extract drug names. Zero additional API cost. This is the only way to catch drugs, which are not in curated dictionaries.
-
-Entities are written to YAML frontmatter:
-
-```yaml
----
-entities:
-  genes:
-    - "EGFR"
-    - "KRAS"
-  diseases:
-    - "NSCLC"
-  compounds:
-    - "M1774"
----
-```
-
-The **entity index** also runs by default (use `--no-entity-index` to skip). It reads all entity data already stored in your vault and generates one hub page per entity in `_entity_index/`. Each hub page contains a [Dataview](https://github.com/blacksmithgu/obsidian-dataview) query that lists every page mentioning that entity — a cross-reference index across your entire vault. Makes no API calls.
-
-```
-_entity_index/genes/EGFR.md      → lists all pages mentioning EGFR
-_entity_index/compounds/M1774.md → lists all pages mentioning M1774
-```
+**`--dataview` mode:** entities are written to YAML frontmatter, and an entity index is generated in `_entity_index/` with one hub page per entity (requires the [Dataview](https://github.com/blacksmithgu/obsidian-dataview) plugin).
 
 #### Ontology Setup
 
-The entity dictionaries must be built once before first use:
-
-Run the setup script — it downloads both files and builds the lookups:
+Entity dictionaries must be built once. The setup script handles this:
 
 ```bash
-python setup.py --skip-packages  # if already installed; or just: python setup.py
+python setup.py                        # full setup (packages + entities)
+python setup.py --skip-packages        # only build entity dictionaries
+python setup.py --update-entities      # re-download updated ontologies
 ```
 
-This downloads ~115 MB total, then generates:
-- `entity_data/hgnc_genes.json` (~7 MB) — gene symbols, aliases, and HGNC IDs
-- `entity_data/mondo_diseases.json` (~37 MB) — disease names, synonyms, and MONDO IDs
-
-To update the ontologies later (updated monthly): `python setup.py --update-entities`
-
-Internal compound mappings are in `entity_data/internal_compounds.yaml` (manually maintained). Company name variants are in `entity_data/companies.yaml` (also manually maintained).
+Company names are in `entity_data/companies.yaml` (manually maintained). Internal compound mappings are in `entity_data/internal_compounds.yaml` (optional, manually maintained).
 
 ## Vault Structure
 
 ```
 obsidian_export/
   .sync_state.json
-  _entity_index/            # Generated by --entity-index
-    genes/
-      EGFR.md
-      KRAS.md
-    drugs/
-      pembrolizumab.md
-    diseases/
-      NSCLC.md
-    compounds/
-      M1774.md
+  _entity_index/                # only with --dataview
+    genes/EGFR.md
+    companies/Tempus.md
+    ...
   Notebook Name/
     Section/
       Page.md
       _attachments/
         slide_001.png
-        data.xlsx
-      _ai_notes/
+        report_a1b2c3d4.pdf
+      _ai_notes/                # only with --vision-ai
         slide_001_ai.md
-        data_ai.md
+        report_a1b2c3d4_ai.md
         .vision_ai_cache.json
-    Another Section/
-      ...
 ```
 
 ## Caveats
 
-- **OneNote must be installed** (desktop app). The script launches a COM connection.
-- **First run is slow** (~30-60s for ~800 pages). Incremental syncs are fast (~10s).
-- **One-way sync** — changes in Obsidian are never pushed back to OneNote.
-- **Page moves** in OneNote are not tracked (appears as new page + orphan).
-- **Sub-pages** are exported flat with a `parent` link in frontmatter.
-- **Conflict files** are named `Page Name (OneNote conflict 2026-05-12).md`. Same-day repeats get `#2`, `#3` suffixes.
-- **Vision AI costs** — each attachment group makes 1 API call. Large vaults with many images will incur costs. Use `--notebooks` to scope runs.
-- **Auto-wikilinks cannot be disabled** — they run on every export. This is intentional but worth knowing if you want a plain export.
-- **Tesseract OCR** — if not installed, screenshot analysis runs without text extraction (silent fallback, no error).
-- **Do not run two instances on the same vault simultaneously** — `.sync_state.json` has no concurrent-write protection.
+- **OneNote desktop app must be installed.** The script talks to OneNote via COM automation.
+- **First run is slow** (~30–60s for ~800 pages). Incremental syncs are fast (~10s).
+- **One-way sync.** Changes in Obsidian are never pushed back to OneNote.
+- **Page moves** in OneNote appear as a new page + orphan.
+- **Sub-pages** are exported flat with `parent`/`children` links in frontmatter.
+- **Vision AI has costs.** Each attachment group makes one API call. Use `--notebooks` to scope runs.
+- **Don't run two instances** on the same vault simultaneously.
 
 ## License
 
