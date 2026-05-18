@@ -1911,6 +1911,26 @@ def main():
             args.no_entities = True
             args.no_entity_index = True
 
+    # Validate API credentials upfront if AI features are requested
+    if (args.vision_ai or args.ai_tags) and not args.dry_run:
+        from vision_ai.client import _load_credentials
+        import os
+        _load_credentials()
+        has_creds = (
+            (os.environ.get('ANTHROPIC_AUTH_TOKEN') and os.environ.get('ANTHROPIC_BASE_URL'))
+            or os.environ.get('ANTHROPIC_API_KEY')
+        )
+        if not has_creds:
+            print(
+                '\n  ERROR: --vision-ai / --ai-tags require Anthropic API credentials.'
+                '\n  Set one of:'
+                '\n    ANTHROPIC_API_KEY=sk-ant-...'
+                '\n    ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL (corporate proxy)'
+                '\n'
+                '\n  See setup.md Step 4 for details.'
+            )
+            sys.exit(1)
+
     # Load existing sync state
     args.output_dir.mkdir(parents=True, exist_ok=True)
     state = load_sync_state(args.output_dir)
