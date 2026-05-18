@@ -334,15 +334,20 @@ def _extract_diseases(text: str, dicts: EntityDictionaries) -> list[EntityMentio
         if disease_key in _FALSE_POSITIVE_DISEASES:
             continue
 
-        # Fast substring check before expensive regex
-        pos = text_lower.find(disease_key)
-        if pos == -1:
-            continue
-        # Verify word boundaries
-        if pos > 0 and text_lower[pos - 1].isalnum():
-            continue
-        end = pos + len(disease_key)
-        if end < len(text_lower) and text_lower[end].isalnum():
+        # Find a word-boundary-valid occurrence (scan all positions)
+        start = 0
+        found = False
+        while True:
+            pos = text_lower.find(disease_key, start)
+            if pos == -1:
+                break
+            end = pos + len(disease_key)
+            if (pos == 0 or not text_lower[pos - 1].isalnum()) and \
+               (end >= len(text_lower) or not text_lower[end].isalnum()):
+                found = True
+                break
+            start = pos + 1
+        if not found:
             continue
 
         info = dicts.disease_names[disease_key]
@@ -513,8 +518,9 @@ def _extract_conferences(text: str, dicts: EntityDictionaries) -> list[EntityMen
         pattern = re.compile(r'\b' + re.escape(variant) + r'\b')
         match = pattern.search(text_lower)
         if match:
-            after = text_lower[match.end():match.end() + 15]
-            if _CONFERENCE_CONTEXT_RE.search(after):
+            before = text_lower[max(0, match.start() - 30):match.start()]
+            after = text_lower[match.end():match.end() + 30]
+            if _CONFERENCE_CONTEXT_RE.search(after) or _CONFERENCE_CONTEXT_RE.search(before):
                 seen.add(canonical)
                 mentions.append(EntityMention(
                     text=variant, canonical=canonical, entity_type='conference'))

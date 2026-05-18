@@ -1257,6 +1257,11 @@ def _inject_ai_tags(markdown: str, ai_tags: list[str]) -> str:
     return new_frontmatter + body
 
 
+_ENTITY_TYPES = ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles',
+                 'methods', 'clinical_trials', 'cell_lines', 'conferences', 'pathways',
+                 'departments')
+
+
 def _inject_entities(markdown: str, entities_dict: dict) -> str:
     """Inject extracted entities into YAML frontmatter."""
     if not entities_dict:
@@ -1291,8 +1296,7 @@ def _inject_entities(markdown: str, entities_dict: dict) -> str:
         closing_idx -= 1
 
     entity_lines = ['entities:']
-    for entity_type in ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles',
-                        'methods', 'clinical_trials', 'cell_lines', 'conferences', 'pathways'):
+    for entity_type in _ENTITY_TYPES:
         items = entities_dict.get(entity_type, [])
         if items:
             entity_lines.append(f'  {entity_type}:')
@@ -1308,7 +1312,8 @@ def _inject_entities(markdown: str, entities_dict: dict) -> str:
 
 
 def _wikify_entities(markdown: str, entities_dict: dict,
-                     wikify_map: dict[str, str] | None = None) -> str:
+                     wikify_map: dict[str, str] | None = None,
+                     current_page_name: str = '') -> str:
     """Convert extracted entities to [[wikilinks]] in body text.
 
     Args:
@@ -1316,6 +1321,7 @@ def _wikify_entities(markdown: str, entities_dict: dict,
         entities_dict: {type: [canonical_names]} for fallback
         wikify_map: {matched_text: canonical} from EntityResult.to_wikify_map().
                     When provided, links abbreviations (e.g. HNSCC) to their canonical page.
+        current_page_name: Skip entities matching the current page to avoid self-links.
     """
     if not entities_dict and not wikify_map:
         return markdown
@@ -1326,16 +1332,18 @@ def _wikify_entities(markdown: str, entities_dict: dict,
 
     # Build name→link_target mapping
     # wikify_map has both original text and canonical; entities_dict only has canonicals
+    page_lower = current_page_name.lower() if current_page_name else ''
     entity_links: dict[str, str] = {}
     if wikify_map:
         for text, canonical in wikify_map.items():
             if len(text) > 2:
+                if canonical.lower() == page_lower or text.lower() == page_lower:
+                    continue
                 entity_links[text] = canonical
     else:
-        for entity_type in ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles',
-                        'methods', 'clinical_trials', 'cell_lines', 'conferences', 'pathways'):
+        for entity_type in _ENTITY_TYPES:
             for name in entities_dict.get(entity_type, []):
-                if len(name) > 2:
+                if len(name) > 2 and name.lower() != page_lower:
                     entity_links[name] = name
 
     if not entity_links:
@@ -1648,6 +1656,7 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
                 cached = state['ai_entities'].get(key)
                 force = args.ai_tags_force or args.entities_force
 
+                wikify_map = None
                 if cached and not force and cached.get('hash') == content_hash:
                     ai_tags = cached.get('tags', [])
                     entities_dict = cached.get('entities', {})
@@ -1664,24 +1673,13 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
 
                         # Merge: Tier 1 takes precedence, LLM adds net-new
                         tier2_result = EntityResult()
-                        for gene in llm_entities.get('genes', []):
-                            tier2_result.genes.append(EntityMention(
-                                text=gene, canonical=gene, entity_type='gene'))
-                        for drug in llm_entities.get('drugs', []):
-                            tier2_result.drugs.append(EntityMention(
-                                text=drug, canonical=drug, entity_type='drug'))
-                        for disease in llm_entities.get('diseases', []):
-                            tier2_result.diseases.append(EntityMention(
-                                text=disease, canonical=disease, entity_type='disease'))
-                        for compound in llm_entities.get('compounds', []):
-                            tier2_result.compounds.append(EntityMention(
-                                text=compound, canonical=compound, entity_type='compound'))
-                        for company in llm_entities.get('companies', []):
-                            tier2_result.companies.append(EntityMention(
-                                text=company, canonical=company, entity_type='company'))
-                        for role in llm_entities.get('roles', []):
-                            tier2_result.roles.append(EntityMention(
-                                text=role, canonical=role, entity_type='role'))
+                        for plural in _ENTITY_TYPES:
+                            singular = plural.rstrip('s')
+                            if singular.endswith('ie'):
+                                singular = singular[:-2] + 'y'
+                            for name in llm_entities.get(plural, []):
+                                getattr(tier2_result, plural).append(EntityMention(
+                                    text=name, canonical=name, entity_type=singular))
 
                         tier1_result.merge(tier2_result)
                         entities_dict = tier1_result.to_dict()
@@ -1705,7 +1703,7 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
                 if ai_tags:
                     markdown = _inject_ai_tags(markdown, ai_tags)
                 if entities_dict:
-                    markdown = _wikify_entities(markdown, entities_dict, wikify_map)
+                    markdown = _wikify_entities(markdown, entities_dict, wikify_map, page['name'])
                     if args.dataview:
                         markdown = _inject_entities(markdown, entities_dict)
 
@@ -1755,7 +1753,7 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
                     }
 
                 if entities_dict:
-                    markdown = _wikify_entities(markdown, entities_dict, wikify_map)
+                    markdown = _wikify_entities(markdown, entities_dict, wikify_map, page['name'])
                     if args.dataview:
                         markdown = _inject_entities(markdown, entities_dict)
 
