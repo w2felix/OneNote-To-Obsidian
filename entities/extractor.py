@@ -46,6 +46,8 @@ FALSE_POSITIVE_GENES = {
     'CR', 'PR', 'SD', 'PD', 'AE', 'SAE', 'DLT', 'MTD', 'RP2D', 'BID',
     'QD', 'IV', 'SC', 'PO', 'IM', 'IT', 'IP', 'QC', 'APOLLO',
     'CS', 'ET', 'AM', 'PM', 'SCT',
+    'DMPK', 'MPI', 'EMD', 'GLP', 'KO', 'PI', 'EMT', 'STAT', 'EST', 'HIPPO',
+    'ILD', 'IC',
     'ACE', 'BIN', 'ADD', 'BIG', 'BIT', 'BOX', 'BUS', 'CAR', 'CAT', 'COG',
     'COW', 'CRY', 'CUP', 'DAD', 'DAY', 'DIG', 'DIM', 'DOG', 'DOT', 'DRY',
     'DUG', 'EAR', 'EAT', 'EGG', 'ERA', 'EVE', 'EYE', 'FAD', 'FAT', 'FEW',
@@ -131,7 +133,18 @@ class EntityResult:
 
         Deduplicates by canonical name (case-insensitive) and by ontology ID
         for diseases (so 'breast cancer' and 'breast carcinoma' collapse to one).
+        Also normalizes methods/companies against their variant dictionaries so
+        LLM-returned variants (e.g. "CITE-seq") collapse to the dictionary
+        canonical form (e.g. "CiteSeq").
         """
+        # Build variant→canonical lookup for normalization
+        variant_canonicals: dict[str, str] = {}
+        if dicts:
+            for variants_map in (dicts.method_variants, dicts.company_variants):
+                if variants_map:
+                    for variant, canonical in variants_map.items():
+                        variant_canonicals[variant] = canonical
+
         result = {}
         for entity_type in self.ENTITY_TYPES:
             mentions = getattr(self, entity_type)
@@ -147,13 +160,29 @@ class EntityResult:
                             ontology_id = info.get('mondo_id', '')
                     if ontology_id and ontology_id in seen_ids:
                         continue
-                    key = m.canonical.lower()
-                    if key not in seen_lower or m.canonical[0].isupper():
-                        seen_lower[key] = m.canonical
+                    # Normalize against dictionary canonical forms
+                    canonical = m.canonical
+                    if entity_type in ('methods', 'companies') and dicts:
+                        norm_key = canonical.lower().replace(' ', '').replace('-', '')
+                        dict_canonical = variant_canonicals.get(canonical.lower())
+                        if not dict_canonical:
+                            # Try without separators
+                            for v, c in variant_canonicals.items():
+                                if v.replace(' ', '').replace('-', '') == norm_key:
+                                    dict_canonical = c
+                                    break
+                        if dict_canonical:
+                            canonical = dict_canonical
+                    key = canonical.lower()
+                    if key not in seen_lower or canonical[0].isupper():
+                        seen_lower[key] = canonical
                     if ontology_id:
                         seen_ids.add(ontology_id)
                 result[entity_type] = sorted(seen_lower.values())
         return result
+
+    # Entity types that should NOT be wikified (appear in frontmatter only)
+    _NO_WIKIFY_TYPES = {'roles'}
 
     def to_wikify_map(self) -> dict[str, str]:
         """Return {matched_text: canonical} for all mentions, used for wikification.
@@ -161,9 +190,13 @@ class EntityResult:
         Includes both the original matched text and the canonical form so
         the wikifier can link abbreviations like HNSCC even when the canonical
         is 'head and neck squamous cell carcinoma'.
+
+        Roles are excluded — they appear in frontmatter but not as wikilinks.
         """
         mapping = {}
         for entity_type in self.ENTITY_TYPES:
+            if entity_type in self._NO_WIKIFY_TYPES:
+                continue
             for m in getattr(self, entity_type):
                 if len(m.text) > 2:
                     mapping[m.text] = m.canonical
@@ -299,7 +332,7 @@ _GENERIC_DISEASE_TERMS = {
     'tumor', 'tumour', 'deficiency', 'malformation', 'carcinoma', 'adenocarcinoma',
 }
 
-# Common English words that happen to be MONDO disease keys/synonyms — always skip
+# Common English/German words that happen to be MONDO disease keys/synonyms — always skip
 _FALSE_POSITIVE_DISEASES = {
     'march', 'cold', 'burn', 'rash', 'coma', 'gout', 'acne', 'gerd',
     'stroke', 'tumor', 'ache', 'aged', 'aids', 'bald', 'bent', 'bile',
@@ -308,6 +341,9 @@ _FALSE_POSITIVE_DISEASES = {
     'numb', 'pale', 'scar', 'sore', 'stiff', 'wart', 'weak',
     'read', 'scan', 'caps', 'face', 'iris', 'lung', 'skin', 'soft',
     'child', 'mass',
+    # Short common words matching rare disease synonyms (TRAPS, PARK, etc.)
+    'dass', 'traps', 'trap', 'park', 'mono', 'fallen', 'fast', 'still',
+    'part', 'rest', 'cast', 'cord', 'ring', 'crest', 'charge',
 }
 
 
@@ -419,7 +455,7 @@ _role_patterns = [(title, re.compile(r'\b' + re.escape(title) + r'\b', re.IGNORE
                   for title in ROLE_TITLES]
 
 _HEAD_OF_RE = re.compile(
-    r'\bHead of ((?:[\w/-]+(?:\s+(?!at\b|in\b|for\b|from\b|since\b|who\b|with\b|is\b|was\b)[\w/-]+){0,5}))',
+    r'\bHead of ((?:[\w/-]+(?:[ \t]+(?!at\b|in\b|for\b|from\b|since\b|who\b|with\b|is\b|was\b)[\w/-]+){0,5}))',
     re.IGNORECASE)
 
 

@@ -628,6 +628,9 @@ def _convert_page_xml_inner(xml_path: Path, page_info: dict, skip_images: bool) 
 
     markdown = '\n'.join(lines)
     markdown = re.sub(r'\n{3,}', '\n\n', markdown)
+    # Convert escaped hash separators (e.g. \#\#\#\#\#...) to horizontal rules
+    _hash_sep = '(' + re.escape('\\#') + '){4,}'
+    markdown = re.sub('^' + _hash_sep + r'\s*$', '---', markdown, flags=re.MULTILINE)
     return markdown, images
 
 
@@ -1065,6 +1068,60 @@ def compute_output_path(page_info: dict, vault_mode: str) -> str:
 
     page_name = sanitize_filename(page_info['name'])
     return '/'.join(safe_parts + [page_name + '.md'])
+
+
+# ============================================================================
+# Language Detection
+# ============================================================================
+
+# German function words (articles, prepositions, conjunctions) that rarely appear in English
+_GERMAN_MARKERS = {
+    'der', 'die', 'das', 'ein', 'eine', 'einer', 'eines', 'einem', 'einen',
+    'und', 'oder', 'aber', 'weil', 'wenn', 'dass', 'auch', 'nicht', 'noch',
+    'ist', 'sind', 'wird', 'wurde', 'werden', 'hat', 'haben', 'hatte',
+    'mit', 'von', 'auf', 'aus', 'bei', 'nach', 'für', 'über', 'unter',
+    'durch', 'vor', 'zwischen', 'zum', 'zur', 'vom', 'beim', 'ins',
+    'sich', 'wir', 'sie', 'ihr', 'sein', 'kann', 'muss', 'soll',
+    'sehr', 'mehr', 'schon', 'dann', 'hier', 'dort', 'jetzt', 'immer',
+    'wie', 'was', 'wer', 'wo', 'warum', 'welche', 'welcher',
+    'diese', 'dieser', 'dieses', 'jede', 'jeder', 'alle', 'viele',
+    'andere', 'neue', 'erste', 'zwei', 'drei',
+}
+
+# English function words that are less common in German
+_ENGLISH_MARKERS = {
+    'the', 'and', 'that', 'this', 'with', 'from', 'have', 'has', 'had',
+    'not', 'but', 'are', 'was', 'were', 'been', 'being', 'will', 'would',
+    'could', 'should', 'which', 'what', 'when', 'where', 'there', 'their',
+    'they', 'them', 'than', 'then', 'also', 'only', 'each', 'every',
+    'into', 'about', 'between', 'through', 'during', 'before', 'after',
+    'above', 'below', 'because', 'while', 'however', 'although',
+}
+
+
+def _detect_language(text: str) -> str:
+    """Detect whether text is primarily English, German, or mixed.
+
+    Returns 'en', 'de', or 'mixed'. Uses function-word frequency heuristic.
+    Requires at least 20 words for reliable detection.
+    """
+    words = re.findall(r'[a-züöäß]+', text.lower())
+    if len(words) < 20:
+        return 'en'  # default for very short pages
+
+    de_count = sum(1 for w in words if w in _GERMAN_MARKERS)
+    en_count = sum(1 for w in words if w in _ENGLISH_MARKERS)
+    total = len(words)
+
+    de_ratio = de_count / total
+    en_ratio = en_count / total
+
+    if de_ratio > 0.08 and en_ratio > 0.05:
+        return 'mixed'
+    elif de_ratio > 0.06:
+        return 'de'
+    else:
+        return 'en'
 
 
 # ============================================================================
@@ -1765,6 +1822,15 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
     # Auto-wikilinks
     if all_page_names:
         markdown = _auto_wikify(markdown, all_page_names, page['name'])
+
+    # Language detection — inject into frontmatter
+    _, body_part = _split_frontmatter(markdown)
+    if body_part.strip():
+        lang = _detect_language(body_part)
+        # Insert before the closing --- of the YAML block
+        yaml_close = markdown.find('\n---', 4)
+        if yaml_close != -1:
+            markdown = markdown[:yaml_close] + f'\nlanguage: {lang}' + markdown[yaml_close:]
 
     # Write markdown file
     full_path.parent.mkdir(parents=True, exist_ok=True)
