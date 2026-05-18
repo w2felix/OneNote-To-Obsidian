@@ -1,6 +1,10 @@
 # Output vault (generated, large, contains personal data)
 obsidian_export/
 
+# Sync state (personal OneNote metadata)
+.sync_state.json
+**/.sync_state.json
+
 # Python
 __pycache__/
 *.pyc
@@ -9,6 +13,7 @@ CLAUDE.md
 # Vision AI generated outputs (written into the vault)
 _ai_notes/
 .vision_ai_cache.json
+**/.vision_ai_cache.json
 
 # Temp files from exploration
 *.xml

@@ -11,6 +11,7 @@ Set up Tesseract manually (no admin rights):
 """
 
 import argparse
+import hashlib
 import os
 import subprocess
 import sys
@@ -36,6 +37,8 @@ TESSERACT_DOWNLOAD_URL = (
     'v5.5.0.20241111/tesseract-ocr-w64-setup-5.5.0.20241111.exe'
 )
 TESSERACT_FILENAME = 'tesseract-ocr-w64-setup-5.5.0.20241111.exe'
+# Set to None to skip verification (upstream doesn't publish checksums)
+TESSERACT_SHA256 = None
 
 TESSERACT_SEARCH_PATHS = [
     Path(os.environ.get('LOCALAPPDATA', '')) / 'Programs' / 'Tesseract-OCR',
@@ -59,6 +62,21 @@ def run(cmd: list[str], description: str) -> bool:
     result = subprocess.run(cmd)
     if result.returncode != 0:
         print(f'  ERROR: {description} failed (exit {result.returncode})', file=sys.stderr)
+        return False
+    return True
+
+
+def verify_checksum(path: Path, expected_sha256: str) -> bool:
+    """Verify SHA-256 checksum of a downloaded file."""
+    sha256 = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(8192), b''):
+            sha256.update(chunk)
+    actual = sha256.hexdigest()
+    if actual != expected_sha256:
+        print(f'  [!] Checksum mismatch for {path.name}', file=sys.stderr)
+        print(f'      Expected: {expected_sha256}', file=sys.stderr)
+        print(f'      Got:      {actual}', file=sys.stderr)
         return False
     return True
 
@@ -231,6 +249,14 @@ def setup_tesseract_manual():
         except Exception as e:
             print(f'\n  Download failed: {e}')
             print(f'  Manual download: {TESSERACT_DOWNLOAD_URL}')
+            return
+
+    # Verify integrity before executing
+    if TESSERACT_SHA256:
+        if not verify_checksum(dest, TESSERACT_SHA256):
+            print('  [!] Downloaded file failed integrity check — aborting.', file=sys.stderr)
+            print('  The file may be corrupted or tampered with. Delete it and retry,')
+            print(f'  or download manually: {TESSERACT_DOWNLOAD_URL}')
             return
 
     # Offer to run the installer for current user
