@@ -30,6 +30,18 @@ class EntityDictionaries:
     # method_variants: variant_name (lowercase) -> canonical_name
     method_variants: dict[str, str] = field(default_factory=dict)
 
+    # clinical_trial_variants: variant_name (lowercase) -> canonical_name
+    clinical_trial_variants: dict[str, str] = field(default_factory=dict)
+
+    # cell_line_variants: variant_name (lowercase) -> canonical_name
+    cell_line_variants: dict[str, str] = field(default_factory=dict)
+
+    # conference_variants: variant_name (lowercase) -> canonical_name
+    conference_variants: dict[str, str] = field(default_factory=dict)
+
+    # pathway_variants: variant_name (lowercase) -> canonical_name
+    pathway_variants: dict[str, str] = field(default_factory=dict)
+
     # Short gene symbols (<=3 chars) that need context validation
     short_gene_symbols: set[str] = field(default_factory=set)
 
@@ -105,6 +117,50 @@ def load_dictionaries() -> EntityDictionaries:
                 for v in variants:
                     dicts.method_variants[v.lower()] = canonical
         logger.debug(f"Loaded {len(dicts.method_variants)} method name variants")
+
+    # Load clinical trials
+    trials_path = DATA_DIR / 'clinical_trials.yaml'
+    if trials_path.exists():
+        with open(trials_path, encoding='utf-8') as f:
+            trials_data = yaml.safe_load(f) or {}
+        for canonical, variants in trials_data.items():
+            if isinstance(variants, list):
+                for v in variants:
+                    dicts.clinical_trial_variants[v.lower()] = canonical
+        logger.debug(f"Loaded {len(dicts.clinical_trial_variants)} clinical trial variants")
+
+    # Load cell lines
+    cell_lines_path = DATA_DIR / 'cell_lines.yaml'
+    if cell_lines_path.exists():
+        with open(cell_lines_path, encoding='utf-8') as f:
+            cell_lines_data = yaml.safe_load(f) or {}
+        for canonical, variants in cell_lines_data.items():
+            if isinstance(variants, list):
+                for v in variants:
+                    dicts.cell_line_variants[v.lower()] = canonical
+        logger.debug(f"Loaded {len(dicts.cell_line_variants)} cell line variants")
+
+    # Load conferences
+    conferences_path = DATA_DIR / 'conferences.yaml'
+    if conferences_path.exists():
+        with open(conferences_path, encoding='utf-8') as f:
+            conferences_data = yaml.safe_load(f) or {}
+        for canonical, variants in conferences_data.items():
+            if isinstance(variants, list):
+                for v in variants:
+                    dicts.conference_variants[v.lower()] = canonical
+        logger.debug(f"Loaded {len(dicts.conference_variants)} conference variants")
+
+    # Load pathways
+    pathways_path = DATA_DIR / 'pathways.yaml'
+    if pathways_path.exists():
+        with open(pathways_path, encoding='utf-8') as f:
+            pathways_data = yaml.safe_load(f) or {}
+        for canonical, variants in pathways_data.items():
+            if isinstance(variants, list):
+                for v in variants:
+                    dicts.pathway_variants[v.lower()] = canonical
+        logger.debug(f"Loaded {len(dicts.pathway_variants)} pathway variants")
 
     _cached_dictionaries = dicts
     return dicts

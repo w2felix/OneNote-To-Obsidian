@@ -1,0 +1,110 @@
+# Named clinical trials and study programs
+# Format: canonical_name: [list of variant spellings (lowercase)]
+# NCT numbers are handled by regex in the extractor, not here.
+
+# Merck KGaA trials
+KEYNOTE-001:
+  - keynote-001
+  - "keynote 001"
+KEYNOTE-024:
+  - keynote-024
+  - "keynote 024"
+KEYNOTE-042:
+  - keynote-042
+  - "keynote 042"
+KEYNOTE-189:
+  - keynote-189
+  - "keynote 189"
+KEYNOTE-426:
+  - keynote-426
+  - "keynote 426"
+KEYNOTE-522:
+  - keynote-522
+  - "keynote 522"
+KEYNOTE-826:
+  - keynote-826
+  - "keynote 826"
+
+# CheckMate (BMS/Ono)
+CheckMate-067:
+  - checkmate-067
+  - "checkmate 067"
+CheckMate-274:
+  - checkmate-274
+  - "checkmate 274"
+CheckMate-9LA:
+  - checkmate-9la
+  - "checkmate 9la"
+
+# APOLLO (Merck)
+APOLLO:
+  - apollo
+
+# IMpower (Roche/Genentech)
+IMpower110:
+  - impower110
+  - "impower 110"
+IMpower150:
+  - impower150
+  - "impower 150"
+
+# DESTINY (Daiichi Sankyo / AstraZeneca)
+DESTINY-Breast03:
+  - destiny-breast03
+  - "destiny breast03"
+DESTINY-Lung01:
+  - destiny-lung01
+  - "destiny lung01"
+
+# HIMALAYA (AstraZeneca)
+HIMALAYA:
+  - himalaya
+
+# CodeBreaK (Amgen)
+CodeBreaK 100:
+  - "codebreak 100"
+  - codebr100
+CodeBreaK 200:
+  - "codebreak 200"
+
+# KRYSTAL (Mirati)
+KRYSTAL-1:
+  - krystal-1
+  - "krystal 1"
+
+# LIBRETTO (Lilly)
+LIBRETTO-001:
+  - libretto-001
+  - "libretto 001"
+
+# CROWN (Pfizer)
+CROWN:
+  - crown
+
+# ADAURA (AstraZeneca)
+ADAURA:
+  - adaura
+
+# PACIFIC (AstraZeneca)
+PACIFIC:
+  - pacific
+
+# RATIONALE (BeiGene)
+RATIONALE-301:
+  - rationale-301
+  - "rationale 301"
+
+# TROPION (Daiichi Sankyo)
+TROPION-Lung01:
+  - tropion-lung01
+  - "tropion lung01"
+
+# GEOMETRY (Novartis)
+GEOMETRY mono-1:
+  - "geometry mono-1"
+  - "geometry mono 1"
+
+# FIGHT (Incyte)
+FIGHT-302:
+  - fight-302
+  - "fight 302"

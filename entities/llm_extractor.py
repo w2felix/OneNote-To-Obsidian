@@ -100,7 +100,8 @@ Content:
 
     # Normalize entity lists
     normalized_entities = {}
-    for key in ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles', 'methods'):
+    for key in ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles',
+                'methods', 'clinical_trials', 'cell_lines', 'conferences', 'pathways'):
         vals = entities.get(key, [])
         if isinstance(vals, list):
             normalized_entities[key] = [str(v).strip() for v in vals if v]

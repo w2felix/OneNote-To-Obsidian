@@ -98,20 +98,25 @@ class EntityResult:
     companies: list[EntityMention] = field(default_factory=list)
     roles: list[EntityMention] = field(default_factory=list)
     methods: list[EntityMention] = field(default_factory=list)
+    clinical_trials: list[EntityMention] = field(default_factory=list)
+    cell_lines: list[EntityMention] = field(default_factory=list)
+    conferences: list[EntityMention] = field(default_factory=list)
+    pathways: list[EntityMention] = field(default_factory=list)
 
-    ENTITY_TYPES = ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles', 'methods')
+    ENTITY_TYPES = ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles',
+                    'methods', 'clinical_trials', 'cell_lines', 'conferences', 'pathways')
 
     def is_empty(self) -> bool:
         return not any(getattr(self, t) for t in self.ENTITY_TYPES)
 
     def merge(self, other: 'EntityResult'):
-        """Merge another EntityResult, deduplicating by canonical name."""
+        """Merge another EntityResult, deduplicating by canonical name (case-insensitive)."""
         for entity_type in self.ENTITY_TYPES:
-            existing = {m.canonical for m in getattr(self, entity_type)}
+            existing = {m.canonical.lower() for m in getattr(self, entity_type)}
             for m in getattr(other, entity_type):
-                if m.canonical not in existing:
+                if m.canonical.lower() not in existing:
                     getattr(self, entity_type).append(m)
-                    existing.add(m.canonical)
+                    existing.add(m.canonical.lower())
 
     def to_dict(self) -> dict:
         """Serialize for YAML frontmatter and caching."""
@@ -119,8 +124,29 @@ class EntityResult:
         for entity_type in self.ENTITY_TYPES:
             mentions = getattr(self, entity_type)
             if mentions:
-                result[entity_type] = sorted(set(m.canonical for m in mentions))
+                seen_lower: dict[str, str] = {}
+                for m in mentions:
+                    key = m.canonical.lower()
+                    if key not in seen_lower or m.canonical[0].isupper():
+                        seen_lower[key] = m.canonical
+                result[entity_type] = sorted(seen_lower.values())
         return result
+
+    def to_wikify_map(self) -> dict[str, str]:
+        """Return {matched_text: canonical} for all mentions, used for wikification.
+
+        Includes both the original matched text and the canonical form so
+        the wikifier can link abbreviations like HNSCC even when the canonical
+        is 'head and neck squamous cell carcinoma'.
+        """
+        mapping = {}
+        for entity_type in self.ENTITY_TYPES:
+            for m in getattr(self, entity_type):
+                if len(m.text) > 2:
+                    mapping[m.text] = m.canonical
+                if len(m.canonical) > 2:
+                    mapping[m.canonical] = m.canonical
+        return mapping
 
 
 def _has_biomedical_context(text: str, pos: int, window: int = 100) -> bool:
@@ -250,6 +276,15 @@ _GENERIC_DISEASE_TERMS = {
     'tumor', 'tumour', 'deficiency', 'malformation',
 }
 
+# Common English words that happen to be MONDO disease keys/synonyms — always skip
+_FALSE_POSITIVE_DISEASES = {
+    'march', 'cold', 'burn', 'rash', 'coma', 'gout', 'acne', 'gerd',
+    'stroke', 'tumor', 'ache', 'aged', 'aids', 'bald', 'bent', 'bile',
+    'boil', 'clot', 'deaf', 'dull', 'faint', 'flush', 'gait', 'grip',
+    'halt', 'haze', 'itch', 'lame', 'lean', 'limp', 'lump', 'mute',
+    'numb', 'pale', 'rash', 'scar', 'sore', 'stiff', 'wart', 'weak',
+}
+
 
 def _extract_diseases(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
     """Extract disease names using MONDO dictionary with inverted word index."""
@@ -271,6 +306,8 @@ def _extract_diseases(text: str, dicts: EntityDictionaries) -> list[EntityMentio
 
     for disease_key in candidates:
         if disease_key in _GENERIC_DISEASE_TERMS:
+            continue
+        if disease_key in _FALSE_POSITIVE_DISEASES:
             continue
 
         # Fast substring check before expensive regex
@@ -385,6 +422,53 @@ def _extract_methods(text: str, dicts: EntityDictionaries) -> list[EntityMention
     return _extract_from_variants(text.lower(), dicts.method_variants, 'method', min_len=2)
 
 
+NCT_RE = re.compile(r'\b(NCT\d{8})\b')
+
+
+def _extract_clinical_trials(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
+    """Extract clinical trial names (NCT numbers + named trials)."""
+    mentions = []
+    seen = set()
+
+    # NCT numbers via regex
+    for match in NCT_RE.finditer(text):
+        nct = match.group(1)
+        if nct not in seen:
+            seen.add(nct)
+            mentions.append(EntityMention(text=nct, canonical=nct, entity_type='clinical_trial'))
+
+    # Named trials from dictionary
+    if dicts.clinical_trial_variants:
+        for m in _extract_from_variants(text.lower(), dicts.clinical_trial_variants,
+                                        'clinical_trial', min_len=4):
+            if m.canonical not in seen:
+                seen.add(m.canonical)
+                mentions.append(m)
+
+    return mentions
+
+
+def _extract_cell_lines(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
+    """Extract cell line names using curated dictionary."""
+    if not dicts.cell_line_variants:
+        return []
+    return _extract_from_variants(text.lower(), dicts.cell_line_variants, 'cell_line', min_len=2)
+
+
+def _extract_conferences(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
+    """Extract conference/congress names using curated dictionary."""
+    if not dicts.conference_variants:
+        return []
+    return _extract_from_variants(text.lower(), dicts.conference_variants, 'conference', min_len=3)
+
+
+def _extract_pathways(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
+    """Extract signaling pathway mentions using curated dictionary."""
+    if not dicts.pathway_variants:
+        return []
+    return _extract_from_variants(text.lower(), dicts.pathway_variants, 'pathway', min_len=3)
+
+
 def extract_entities(text: str, dicts: EntityDictionaries | None = None) -> EntityResult:
     """Extract all entity types from text using dictionary/regex matching (Tier 1).
 
@@ -406,4 +490,8 @@ def extract_entities(text: str, dicts: EntityDictionaries | None = None) -> Enti
         companies=_extract_companies(text, dicts),
         roles=_extract_roles(text),
         methods=_extract_methods(text, dicts),
+        clinical_trials=_extract_clinical_trials(text, dicts),
+        cell_lines=_extract_cell_lines(text, dicts),
+        conferences=_extract_conferences(text, dicts),
+        pathways=_extract_pathways(text, dicts),
     )

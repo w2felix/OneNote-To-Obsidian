@@ -36,6 +36,10 @@ def generate_entity_index(output_dir: Path, state: dict):
         'companies': {},
         'roles': {},
         'methods': {},
+        'clinical_trials': {},
+        'cell_lines': {},
+        'conferences': {},
+        'pathways': {},
     }
 
     for page_key, page_data in entities_state.items():

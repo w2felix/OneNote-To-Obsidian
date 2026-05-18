@@ -1,0 +1,105 @@
+# Scientific conferences and congresses in oncology/pharma
+# Format: canonical_name: [list of variant spellings (lowercase)]
+
+# Major oncology
+AACR:
+  - aacr
+  - "american association for cancer research"
+ASCO:
+  - asco
+  - "american society of clinical oncology"
+ESMO:
+  - esmo
+  - "european society for medical oncology"
+SITC:
+  - sitc
+  - "society for immunotherapy of cancer"
+AACR Annual Meeting:
+  - "aacr annual meeting"
+  - "aacr annual"
+
+# Hematology
+ASH:
+  - ash
+  - "american society of hematology"
+EHA:
+  - eha
+  - "european hematology association"
+
+# Immunology/Immunotherapy
+CIMT:
+  - cimt
+CICON:
+  - cicon
+PEGS:
+  - pegs
+
+# Genomics/Computational
+AGBT:
+  - agbt
+ISMB:
+  - ismb
+RECOMB:
+  - recomb
+GCC:
+  - gcc
+  - "german conference on bioinformatics"
+
+# Pharma/Drug development
+AAPS:
+  - aaps
+DIA:
+  - dia
+BIO:
+  - bio
+  - "bio international"
+JPM:
+  - jpm
+  - "jp morgan healthcare conference"
+  - "jp morgan"
+
+# European oncology
+DGHO:
+  - dgho
+  - "deutsche gesellschaft für hämatologie und medizinische onkologie"
+DGP:
+  - dgp
+AIO:
+  - aio
+
+# Pathology/Diagnostics
+USCAP:
+  - uscap
+CAP:
+  - cap
+
+# Computational biology
+MLCB:
+  - mlcb
+NeurIPS:
+  - neurips
+  - nips
+ICML:
+  - icml
+ICLR:
+  - iclr
+
+# Multi-omics/Systems biology
+HUPO:
+  - hupo
+ASMS:
+  - asms
+
+# Other relevant
+WCLC:
+  - wclc
+  - "world conference on lung cancer"
+SABCS:
+  - sabcs
+  - "san antonio breast cancer symposium"
+GU ASCO:
+  - "gu asco"
+  - "genitourinary cancers symposium"
+SNO:
+  - sno
+  - "society for neuro-oncology"

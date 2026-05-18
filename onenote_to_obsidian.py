@@ -1103,10 +1103,47 @@ _GENERIC_PAGE_NAMES = {
     'july', 'august', 'september', 'october', 'november', 'december',
     'meetings', 'projects', 'tasks', 'inbox', 'archive', 'resources',
     'links', 'ideas', 'drafts', 'contacts', 'people', 'tools',
+    'topics', 'issues', 'goals', 'priorities', 'decisions', 'feedback',
     'to meet', 'to do', 'to read', 'to review', 'to discuss',
 }
 
 _DOUBLE_BRACKET_RE = re.compile(r'\[\[\[\[([^\[\]]+)\]\]\]\]')
+
+
+_PERSON_PREFIX_RE = re.compile(r'^.+[_] +(.+)')
+_PARENTHETICAL_RE = re.compile(r'\s*\([^)]*\)\s*$')
+
+
+def _build_page_name_aliases(all_page_names: set[str], current_page_name: str) -> dict[str, str]:
+    """Build {search_text: link_target} for auto-wikification.
+
+    Includes full page names and stripped person names (e.g., "Ralph Lindemann"
+    extracted from "Onc_ Ralph Lindemann (IHC)").
+    """
+    aliases: dict[str, str] = {}
+
+    for name in all_page_names:
+        if name == current_page_name or len(name) <= 3:
+            continue
+        if name.lower() in _GENERIC_PAGE_NAMES:
+            continue
+        aliases[name] = name
+
+        # Detect "Prefix_ Person Name" or "Prefix_ Person Name (note)" pattern
+        m = _PERSON_PREFIX_RE.match(name)
+        if m:
+            person_name = m.group(1).strip()
+            # Strip trailing parenthetical like "(IHC)" or "(ADC)"
+            person_name = _PARENTHETICAL_RE.sub('', person_name).strip()
+            # Only add if it looks like a full person name (2+ words, each capitalized)
+            words = person_name.split()
+            if (len(words) >= 2
+                    and all(w[0].isupper() for w in words if w)
+                    and person_name.lower() not in _GENERIC_PAGE_NAMES
+                    and person_name not in aliases):
+                aliases[person_name] = name
+
+    return aliases
 
 
 def _auto_wikify(markdown: str, all_page_names: set[str], current_page_name: str) -> str:
@@ -1115,19 +1152,16 @@ def _auto_wikify(markdown: str, all_page_names: set[str], current_page_name: str
     if not body.strip() or len(body) > _MAX_WIKIFY_LENGTH:
         return markdown
 
-    # Sort names longest-first to avoid partial matches
-    candidates = sorted(
-        (name for name in all_page_names
-         if name != current_page_name and len(name) > 3
-         and name.lower() not in _GENERIC_PAGE_NAMES),
-        key=len, reverse=True
-    )
+    # Build search text → link target mapping (includes person name aliases)
+    aliases = _build_page_name_aliases(all_page_names, current_page_name)
 
-    if not candidates:
+    if not aliases:
         return markdown
 
+    # Sort longest-first to avoid partial matches
+    sorted_texts = sorted(aliases.keys(), key=len, reverse=True)
+
     # Split body into protected and unprotected segments
-    # Protected: code blocks, inline code, existing wikilinks, markdown links
     protected_pattern = re.compile(
         r'```[\s\S]*?```'          # fenced code blocks
         r'|`[^`\n]+`'             # inline code
@@ -1135,7 +1169,6 @@ def _auto_wikify(markdown: str, all_page_names: set[str], current_page_name: str
         r'|\[[^\]]*\]\([^)]*\)'   # markdown links
     )
 
-    # Build segments: list of (text, is_protected)
     segments = []
     last_end = 0
     for m in protected_pattern.finditer(body):
@@ -1146,23 +1179,29 @@ def _auto_wikify(markdown: str, all_page_names: set[str], current_page_name: str
     if last_end < len(body):
         segments.append((body[last_end:], False))
 
-    # Replace in unprotected segments
-    for name in candidates:
-        pattern = re.compile(r'\b' + re.escape(name) + r'\b', re.IGNORECASE)
+    # Replace in unprotected segments, marking results as protected
+    for search_text in sorted_texts:
+        link_target = aliases[search_text]
+        pattern = re.compile(r'\b' + re.escape(search_text) + r'\b', re.IGNORECASE)
         new_segments = []
         for text, protected in segments:
             if protected:
                 new_segments.append((text, True))
             else:
-                def _make_link(match, _name=name):
-                    return f'[[{_name}]]'
-                new_text = pattern.sub(_make_link, text)
-                new_segments.append((new_text, False))
+                parts = pattern.split(text)
+                matches = pattern.findall(text)
+                for i, part in enumerate(parts):
+                    if part:
+                        new_segments.append((part, False))
+                    if i < len(matches):
+                        if link_target != search_text:
+                            link = f'[[{link_target}|{matches[i]}]]'
+                        else:
+                            link = f'[[{link_target}]]'
+                        new_segments.append((link, True))
         segments = new_segments
 
     new_body = ''.join(text for text, _ in segments)
-
-    # Collapse any double brackets from re-wrapping already-wikified text
     new_body = _DOUBLE_BRACKET_RE.sub(r'[[\1]]', new_body)
 
     return frontmatter + new_body
@@ -1252,7 +1291,8 @@ def _inject_entities(markdown: str, entities_dict: dict) -> str:
         closing_idx -= 1
 
     entity_lines = ['entities:']
-    for entity_type in ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles', 'methods'):
+    for entity_type in ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles',
+                        'methods', 'clinical_trials', 'cell_lines', 'conferences', 'pathways'):
         items = entities_dict.get(entity_type, [])
         if items:
             entity_lines.append(f'  {entity_type}:')
@@ -1267,23 +1307,38 @@ def _inject_entities(markdown: str, entities_dict: dict) -> str:
     return new_frontmatter + body
 
 
-def _wikify_entities(markdown: str, entities_dict: dict) -> str:
-    """Convert extracted entities to [[wikilinks]] in body text (native Obsidian mode)."""
-    if not entities_dict:
+def _wikify_entities(markdown: str, entities_dict: dict,
+                     wikify_map: dict[str, str] | None = None) -> str:
+    """Convert extracted entities to [[wikilinks]] in body text.
+
+    Args:
+        markdown: Full markdown with frontmatter
+        entities_dict: {type: [canonical_names]} for fallback
+        wikify_map: {matched_text: canonical} from EntityResult.to_wikify_map().
+                    When provided, links abbreviations (e.g. HNSCC) to their canonical page.
+    """
+    if not entities_dict and not wikify_map:
         return markdown
 
     frontmatter, body = _split_frontmatter(markdown)
     if not body.strip():
         return markdown
 
-    # Collect all entity names to wikify
-    entity_names = set()
-    for entity_type in ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles', 'methods'):
-        for name in entities_dict.get(entity_type, []):
-            if len(name) > 2:
-                entity_names.add(name)
+    # Build name→link_target mapping
+    # wikify_map has both original text and canonical; entities_dict only has canonicals
+    entity_links: dict[str, str] = {}
+    if wikify_map:
+        for text, canonical in wikify_map.items():
+            if len(text) > 2:
+                entity_links[text] = canonical
+    else:
+        for entity_type in ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles',
+                        'methods', 'clinical_trials', 'cell_lines', 'conferences', 'pathways'):
+            for name in entities_dict.get(entity_type, []):
+                if len(name) > 2:
+                    entity_links[name] = name
 
-    if not entity_names:
+    if not entity_links:
         return markdown
 
     # Protect existing wikilinks, code blocks, inline code, markdown links
@@ -1304,19 +1359,28 @@ def _wikify_entities(markdown: str, entities_dict: dict) -> str:
     if last_end < len(body):
         segments.append((body[last_end:], False))
 
-    # Replace entity mentions longest-first
-    sorted_names = sorted(entity_names, key=len, reverse=True)
-    for name in sorted_names:
-        pattern = re.compile(r'\b' + re.escape(name) + r'\b', re.IGNORECASE)
+    # Replace entity mentions longest-first, marking results as protected
+    sorted_texts = sorted(entity_links.keys(), key=len, reverse=True)
+    for text_match in sorted_texts:
+        link_target = entity_links[text_match]
+        pattern = re.compile(r'\b' + re.escape(text_match) + r'\b', re.IGNORECASE)
         new_segments = []
         for text, protected in segments:
             if protected:
                 new_segments.append((text, True))
             else:
-                def _make_entity_link(match, _name=name):
-                    return f'[[{_name}]]'
-                new_text = pattern.sub(_make_entity_link, text)
-                new_segments.append((new_text, False))
+                parts = pattern.split(text)
+                matches = pattern.findall(text)
+                for i, part in enumerate(parts):
+                    if part:
+                        new_segments.append((part, False))
+                    if i < len(matches):
+                        matched = matches[i]
+                        if link_target != matched and link_target != text_match:
+                            link = f'[[{link_target}|{matched}]]'
+                        else:
+                            link = f'[[{link_target}]]'
+                        new_segments.append((link, True))
         segments = new_segments
 
     new_body = ''.join(text for text, _ in segments)
@@ -1621,9 +1685,11 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
 
                         tier1_result.merge(tier2_result)
                         entities_dict = tier1_result.to_dict()
+                        wikify_map = tier1_result.to_wikify_map()
                     else:
                         ai_tags = []
                         entities_dict = {}
+                        wikify_map = None
 
                     # Cache both
                     state['ai_entities'][key] = {
@@ -1639,10 +1705,9 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
                 if ai_tags:
                     markdown = _inject_ai_tags(markdown, ai_tags)
                 if entities_dict:
+                    markdown = _wikify_entities(markdown, entities_dict, wikify_map)
                     if args.dataview:
                         markdown = _inject_entities(markdown, entities_dict)
-                    else:
-                        markdown = _wikify_entities(markdown, entities_dict)
 
             elif args.ai_tags:
                 from vision_ai.tagger import generate_tags
@@ -1673,24 +1738,26 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
 
                 if cached and not args.entities_force and cached.get('hash') == content_hash:
                     entities_dict = cached.get('entities', {})
+                    wikify_map = None
                 else:
                     word_count = len(body.split())
                     if word_count >= MIN_WORD_COUNT:
                         dicts = load_dictionaries()
                         result = extract_entities(body, dicts)
                         entities_dict = result.to_dict()
+                        wikify_map = result.to_wikify_map()
                     else:
                         entities_dict = {}
+                        wikify_map = None
                     state['ai_entities'][key] = {
                         'hash': content_hash,
                         'entities': entities_dict,
                     }
 
                 if entities_dict:
+                    markdown = _wikify_entities(markdown, entities_dict, wikify_map)
                     if args.dataview:
                         markdown = _inject_entities(markdown, entities_dict)
-                    else:
-                        markdown = _wikify_entities(markdown, entities_dict)
 
         except ImportError as e:
             print(f'\n  [!] Entity/tag dependencies not available: {e}')
