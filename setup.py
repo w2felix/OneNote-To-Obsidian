@@ -18,23 +18,11 @@ import urllib.request
 from pathlib import Path
 
 DATA_DIR = Path(__file__).parent / 'entity_data'
+REQUIREMENTS_TXT = Path(__file__).parent / 'requirements.txt'
 
 # ── Packages ──────────────────────────────────────────────────────────────────
 
-PIP_PACKAGES = [
-    'defusedxml',
-    'beautifulsoup4',
-    'anthropic',
-    'pymupdf',
-    'pillow',
-    'pdfplumber',
-    'python-pptx',
-    'python-docx',
-    'tabulate',
-    'PyYAML',
-]
-
-# Installed via conda (better binary compatibility on Windows)
+# Installed via conda when available (better binary compatibility on Windows)
 CONDA_PACKAGES = [
     'pandas',
     'openpyxl',
@@ -95,9 +83,12 @@ def conda_executable() -> str | None:
 
 def install_pip_packages():
     section('Installing pip packages')
+    if not REQUIREMENTS_TXT.exists():
+        print(f'  ERROR: {REQUIREMENTS_TXT} not found', file=sys.stderr)
+        return
     ok = run(
-        [sys.executable, '-m', 'pip', 'install', '--upgrade'] + PIP_PACKAGES,
-        'pip install',
+        [sys.executable, '-m', 'pip', 'install', '--upgrade', '-r', str(REQUIREMENTS_TXT)],
+        'pip install -r requirements.txt',
     )
     if not ok:
         print('  Some pip packages failed — check output above.', file=sys.stderr)
@@ -113,11 +104,10 @@ def install_conda_packages(conda: str):
 
 def warn_no_conda():
     print('\n  [!] Not running inside a conda environment.')
-    print('      pandas and openpyxl will be installed via pip.')
-    print('      pytesseract will be installed via pip.')
+    print('      pandas, openpyxl, and pytesseract will be installed via pip.')
     run(
-        [sys.executable, '-m', 'pip', 'install', 'pandas', 'openpyxl', 'pytesseract'],
-        'pip install pandas openpyxl pytesseract',
+        [sys.executable, '-m', 'pip', 'install'] + CONDA_PACKAGES,
+        'pip install ' + ' '.join(CONDA_PACKAGES),
     )
 
 

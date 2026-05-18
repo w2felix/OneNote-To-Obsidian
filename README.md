@@ -7,11 +7,12 @@ Built for corporate setups where the Obsidian OneNote plugin can't be used (no a
 ## Requirements
 
 - **Windows** with OneNote desktop app installed and logged in
-- **Python 3.10+** (recommended: [Miniconda](https://docs.conda.io/en/latest/miniconda.html))
+- **Python 3.11+** (recommended: [Miniconda](https://docs.conda.io/en/latest/miniconda.html))
 
 Run the setup script to install everything:
 
 ```bash
+conda activate ds_env   # or your environment name
 python setup.py
 ```
 
@@ -147,13 +148,19 @@ Runs automatically once dictionaries are built (see [Setup](setup.md)). Finds sp
 | Entity Type | Example |
 |---|---|
 | Genes/Proteins | EGFR, KRAS, PD-L1 |
-| Diseases | NSCLC, melanoma |
-| Companies | Tempus, Caris, Merck |
-| Roles | Principal Scientist, Director |
+| Diseases | NSCLC, melanoma, glioblastoma |
+| Companies | Tempus, Caris, Merck (with parent/subsidiary hierarchy) |
+| Roles | Principal Scientist, Head of Computational Biology |
+| Methods/Modalities | scRNA-seq, CRISPR, ADC, PROTAC |
 | Internal compounds | M1774, M3814 |
+| Clinical trials | KEYNOTE-158, NCT03482401 |
+| Cell lines | A549, HCT116, MCF-7 |
+| Conferences | AACR, ASCO, ESMO |
+| Pathways | PI3K/AKT, Wnt, MAPK |
+| Departments | RU ONC, DDTech, TBR |
 | Drugs (requires `--ai-tags`) | pembrolizumab, osimertinib |
 
-Local dictionary matching finds genes, diseases, companies, roles, and compounds without any API calls. When `--ai-tags` is used, drugs, companies, and roles are additionally extracted by Claude at no extra cost (piggybacked on the same API call).
+Local dictionary matching finds genes, diseases, companies, roles, methods, trials, cell lines, conferences, pathways, departments, and compounds without any API calls. When `--ai-tags` is used, drugs and methods are additionally extracted by Claude at no extra cost (piggybacked on the same API call).
 
 **Default mode:** entities become `[[wikilinks]]` in body text — Obsidian's backlinks panel shows all pages mentioning each entity.
 
@@ -169,7 +176,18 @@ python setup.py --skip-packages        # only build entity dictionaries
 python setup.py --update-entities      # re-download updated ontologies
 ```
 
-Company names are in `entity_data/companies.yaml` (manually maintained). Internal compound mappings are in `entity_data/internal_compounds.yaml` (optional, manually maintained).
+Curated dictionaries in `entity_data/` (manually maintained):
+
+| File | Content |
+|------|---------|
+| `companies.yaml` | Company names with parent/subsidiary hierarchy |
+| `methods.yaml` | Experimental methods, technologies, drug modalities |
+| `departments.yaml` | Internal organizational units |
+| `clinical_trials.yaml` | Named clinical trials (KEYNOTE, CheckMate, etc.) |
+| `cell_lines.yaml` | Cancer cell line names |
+| `conferences.yaml` | Scientific conferences and congresses |
+| `pathways.yaml` | Signaling pathways and biological processes |
+| `internal_compounds.yaml` | Optional metadata for M-number compounds |
 
 ## Vault Structure
 

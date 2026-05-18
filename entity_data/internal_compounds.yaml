@@ -1,0 +1,12 @@
+# Internal compound codes (M followed by 4 digits)
+# Format: code: {name: ..., target: ..., modality: ...}
+# These are matched by regex M\d{4}, this file provides metadata only.
+
+# M1774:
+#   name: tuvusertib
+#   target: ATR
+#   modality: small molecule
+# M3814:
+#   name: peposertib
+#   target: DNA-PK
+#   modality: small molecule
