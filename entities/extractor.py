@@ -24,7 +24,7 @@ BIOMEDICAL_CONTEXT_WORDS = {
 # Common English/German words that happen to be valid HGNC symbols — always skip
 FALSE_POSITIVE_GENES = {
     'FOR', 'WAS', 'CAN', 'SET', 'MAN', 'SHE', 'HER', 'NOT', 'ALL', 'AND',
-    'THE', 'HAS', 'HAD', 'ARE', 'WAS', 'ONE', 'TWO', 'SIX', 'TEN', 'AGE',
+    'THE', 'HAS', 'HAD', 'ARE', 'ONE', 'TWO', 'SIX', 'TEN', 'AGE',
     'END', 'GAP', 'MAP', 'CAP', 'CAB', 'GAS', 'REST', 'FAST', 'IMPACT',
     'FATE', 'CAMP', 'CAST', 'COPE', 'CARD', 'CARE', 'CHANCE', 'CHARGE',
     'CLASS', 'CLOCK', 'COIL', 'COMPLEX', 'CORD', 'CORE', 'COUNT', 'CUT',
@@ -48,7 +48,7 @@ FALSE_POSITIVE_GENES = {
     'ACE', 'BIN', 'ADD', 'BIG', 'BIT', 'BOX', 'BUS', 'CAR', 'CAT', 'COG',
     'COW', 'CRY', 'CUP', 'DAD', 'DAY', 'DIG', 'DIM', 'DOG', 'DOT', 'DRY',
     'DUG', 'EAR', 'EAT', 'EGG', 'ERA', 'EVE', 'EYE', 'FAD', 'FAT', 'FEW',
-    'FIN', 'FLY', 'FOG', 'FOX', 'FUN', 'FUR', 'GOD', 'GUM', 'GUN', 'GUT',
+    'FIN', 'FLY', 'FOG', 'FOX', 'FUN', 'FUR', 'GOD', 'GUM', 'GUN',
     'GYM', 'HAM', 'HAT', 'HEN', 'HEX', 'HID', 'HIT', 'HOG', 'HOP', 'HOT',
     'HUB', 'HUG', 'HUT', 'ICE', 'ILL', 'INK', 'INN', 'ION', 'IVY', 'JAM',
     'JAR', 'JAW', 'JET', 'JOB', 'JOG', 'JOY', 'JUG', 'KIT', 'LAB', 'LAP',
@@ -97,60 +97,29 @@ class EntityResult:
     compounds: list[EntityMention] = field(default_factory=list)
     companies: list[EntityMention] = field(default_factory=list)
     roles: list[EntityMention] = field(default_factory=list)
+    methods: list[EntityMention] = field(default_factory=list)
+
+    ENTITY_TYPES = ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles', 'methods')
 
     def is_empty(self) -> bool:
-        return not (self.genes or self.drugs or self.diseases
-                    or self.compounds or self.companies or self.roles)
+        return not any(getattr(self, t) for t in self.ENTITY_TYPES)
 
     def merge(self, other: 'EntityResult'):
         """Merge another EntityResult, deduplicating by canonical name."""
-        existing_genes = {m.canonical for m in self.genes}
-        existing_drugs = {m.canonical for m in self.drugs}
-        existing_diseases = {m.canonical for m in self.diseases}
-        existing_compounds = {m.canonical for m in self.compounds}
-        existing_companies = {m.canonical for m in self.companies}
-        existing_roles = {m.canonical for m in self.roles}
-
-        for m in other.genes:
-            if m.canonical not in existing_genes:
-                self.genes.append(m)
-                existing_genes.add(m.canonical)
-        for m in other.drugs:
-            if m.canonical not in existing_drugs:
-                self.drugs.append(m)
-                existing_drugs.add(m.canonical)
-        for m in other.diseases:
-            if m.canonical not in existing_diseases:
-                self.diseases.append(m)
-                existing_diseases.add(m.canonical)
-        for m in other.compounds:
-            if m.canonical not in existing_compounds:
-                self.compounds.append(m)
-                existing_compounds.add(m.canonical)
-        for m in other.companies:
-            if m.canonical not in existing_companies:
-                self.companies.append(m)
-                existing_companies.add(m.canonical)
-        for m in other.roles:
-            if m.canonical not in existing_roles:
-                self.roles.append(m)
-                existing_roles.add(m.canonical)
+        for entity_type in self.ENTITY_TYPES:
+            existing = {m.canonical for m in getattr(self, entity_type)}
+            for m in getattr(other, entity_type):
+                if m.canonical not in existing:
+                    getattr(self, entity_type).append(m)
+                    existing.add(m.canonical)
 
     def to_dict(self) -> dict:
         """Serialize for YAML frontmatter and caching."""
         result = {}
-        if self.genes:
-            result['genes'] = sorted(set(m.canonical for m in self.genes))
-        if self.drugs:
-            result['drugs'] = sorted(set(m.canonical for m in self.drugs))
-        if self.diseases:
-            result['diseases'] = sorted(set(m.canonical for m in self.diseases))
-        if self.compounds:
-            result['compounds'] = sorted(set(m.canonical for m in self.compounds))
-        if self.companies:
-            result['companies'] = sorted(set(m.canonical for m in self.companies))
-        if self.roles:
-            result['roles'] = sorted(set(m.canonical for m in self.roles))
+        for entity_type in self.ENTITY_TYPES:
+            mentions = getattr(self, entity_type)
+            if mentions:
+                result[entity_type] = sorted(set(m.canonical for m in mentions))
         return result
 
 
@@ -172,7 +141,6 @@ def _extract_compounds(text: str, dicts: EntityDictionaries) -> list[EntityMenti
             continue
         seen.add(code)
 
-        info = dicts.compounds.get(code, {})
         mentions.append(EntityMention(
             text=match.group(0),
             canonical=code,
@@ -302,45 +270,49 @@ def _extract_diseases(text: str, dicts: EntityDictionaries) -> list[EntityMentio
             candidates.update(word_index[word])
 
     for disease_key in candidates:
-        # Skip overly generic terms
         if disease_key in _GENERIC_DISEASE_TERMS:
             continue
 
-        pattern = r'\b' + re.escape(disease_key) + r'\b'
-        if re.search(pattern, text_lower):
-            info = dicts.disease_names[disease_key]
-            canonical = info.get('label', disease_key)
-            canonical_lower = canonical.lower()
+        # Fast substring check before expensive regex
+        pos = text_lower.find(disease_key)
+        if pos == -1:
+            continue
+        # Verify word boundaries
+        if pos > 0 and text_lower[pos - 1].isalnum():
+            continue
+        end = pos + len(disease_key)
+        if end < len(text_lower) and text_lower[end].isalnum():
+            continue
 
-            # Skip if canonical is generic
-            if canonical_lower in _GENERIC_DISEASE_TERMS:
-                continue
+        info = dicts.disease_names[disease_key]
+        canonical = info.get('label', disease_key)
+        canonical_lower = canonical.lower()
 
-            if canonical_lower in seen:
-                continue
-            seen.add(canonical_lower)
+        if canonical_lower in _GENERIC_DISEASE_TERMS:
+            continue
 
-            mentions.append(EntityMention(
-                text=disease_key,
-                canonical=canonical,
-                entity_type='disease',
-                ontology_id=info.get('mondo_id', ''),
-            ))
+        if canonical_lower in seen:
+            continue
+        seen.add(canonical_lower)
+
+        mentions.append(EntityMention(
+            text=disease_key,
+            canonical=canonical,
+            entity_type='disease',
+            ontology_id=info.get('mondo_id', ''),
+        ))
 
     return mentions
 
 
-def _extract_companies(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
-    """Extract company names using curated dictionary."""
-    if not dicts.company_variants:
-        return []
-
+def _extract_from_variants(text_lower: str, variants: dict[str, str],
+                           entity_type: str, min_len: int = 3) -> list[EntityMention]:
+    """Extract entities by matching variant spellings against text."""
     mentions = []
     seen = set()
-    text_lower = text.lower()
 
-    for variant_lower, canonical in dicts.company_variants.items():
-        if len(variant_lower) < 3:
+    for variant_lower, canonical in variants.items():
+        if len(variant_lower) < min_len:
             continue
         pattern = r'\b' + re.escape(variant_lower) + r'\b'
         if re.search(pattern, text_lower):
@@ -350,10 +322,17 @@ def _extract_companies(text: str, dicts: EntityDictionaries) -> list[EntityMenti
             mentions.append(EntityMention(
                 text=variant_lower,
                 canonical=canonical,
-                entity_type='company',
+                entity_type=entity_type,
             ))
 
     return mentions
+
+
+def _extract_companies(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
+    """Extract company names using curated dictionary."""
+    if not dicts.company_variants:
+        return []
+    return _extract_from_variants(text.lower(), dicts.company_variants, 'company', min_len=3)
 
 
 ROLE_TITLES = [
@@ -399,6 +378,13 @@ def _extract_roles(text: str) -> list[EntityMention]:
     return mentions
 
 
+def _extract_methods(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
+    """Extract methodology/technology mentions using curated dictionary."""
+    if not dicts.method_variants:
+        return []
+    return _extract_from_variants(text.lower(), dicts.method_variants, 'method', min_len=2)
+
+
 def extract_entities(text: str, dicts: EntityDictionaries | None = None) -> EntityResult:
     """Extract all entity types from text using dictionary/regex matching (Tier 1).
 
@@ -419,4 +405,5 @@ def extract_entities(text: str, dicts: EntityDictionaries | None = None) -> Enti
         drugs=[],  # Drugs come from LLM (Tier 2) — no curated drug dictionary
         companies=_extract_companies(text, dicts),
         roles=_extract_roles(text),
+        methods=_extract_methods(text, dicts),
     )

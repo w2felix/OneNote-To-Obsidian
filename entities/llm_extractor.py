@@ -8,11 +8,11 @@ import json
 import logging
 import re
 
-from vision_ai.client import api_call_with_retry
+from vision_ai.client import api_call_with_retry, VISION_MODEL
 
 logger = logging.getLogger(__name__)
 
-TAGGER_MODEL = "claude-sonnet-4-6"
+TAGGER_MODEL = VISION_MODEL
 
 COMBINED_SYSTEM_PROMPT = """You are a knowledge-base taxonomist and biomedical annotator. Given this note, return:
 1. 3-7 topic tags (lowercase, hyphenated)
@@ -27,7 +27,8 @@ Return ONLY a JSON object with this structure:
     "diseases": ["NSCLC", "melanoma"],
     "compounds": ["M1774"],
     "companies": ["Roche", "AstraZeneca"],
-    "roles": ["Principal Scientist", "Director"]
+    "roles": ["Principal Scientist", "Director"],
+    "methods": ["scRNA-seq", "CRISPR", "Deep Learning"]
   }
 }
 
@@ -45,6 +46,7 @@ Entity rules:
 - compounds: Internal codes matching M followed by 4 digits (e.g., M1774, M3814).
 - companies: Pharma/biotech/diagnostics companies mentioned. Use canonical company names.
 - roles: Organizational titles and positions (e.g., "Principal Scientist", "Associate Director", "Intern", "Group Leader"). Use the title as written.
+- methods: Experimental methods, technologies, and computational approaches (e.g., "scRNA-seq", "CRISPR", "ChIP-seq", "Deep Learning", "Flow Cytometry"). Use canonical names.
 - Only include entities actually mentioned in the text.
 - If no biomedical entities are present, return empty lists."""
 
@@ -98,7 +100,7 @@ Content:
 
     # Normalize entity lists
     normalized_entities = {}
-    for key in ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles'):
+    for key in ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles', 'methods'):
         vals = entities.get(key, [])
         if isinstance(vals, list):
             normalized_entities[key] = [str(v).strip() for v in vals if v]

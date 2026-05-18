@@ -5,11 +5,11 @@ import json
 import logging
 import re
 
-from vision_ai.client import api_call_with_retry
+from vision_ai.client import api_call_with_retry, VISION_MODEL
 
 logger = logging.getLogger(__name__)
 
-TAGGER_MODEL = "claude-sonnet-4-6"
+TAGGER_MODEL = VISION_MODEL
 MIN_WORD_COUNT = 50
 
 SYSTEM_PROMPT = """You are a knowledge-base taxonomist. Given this note, return 3-7 topic tags.
@@ -63,14 +63,14 @@ def generate_tags(markdown_body: str, page_title: str, section_path: str,
         return []
 
     # Compute content hash for caching
-    content_hash = _content_hash(body)
+    body_hash = _content_hash(body)
 
     # Check cache
     if 'ai_tags' not in state:
         state['ai_tags'] = {}
 
     cached = state['ai_tags'].get(page_key)
-    if cached and not force and cached.get('hash') == content_hash:
+    if cached and not force and cached.get('hash') == body_hash:
         logger.debug(f"AI tags cache hit for {page_title}")
         return cached['tags']
 
@@ -120,7 +120,7 @@ Content:
 
         # Update cache
         state['ai_tags'][page_key] = {
-            'hash': content_hash,
+            'hash': body_hash,
             'tags': final_tags,
         }
 

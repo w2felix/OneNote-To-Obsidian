@@ -14,21 +14,21 @@ Usage:
 import argparse
 import base64
 import hashlib
+import html
 import json
 import re
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
 try:
     import defusedxml.ElementTree as ET
 except ImportError:
     print("ERROR: 'defusedxml' is required for safe XML parsing.")
     print("Install with: pip install defusedxml")
     sys.exit(1)
-from datetime import datetime, timezone
-from pathlib import Path
-
-import html
 
 from bs4 import BeautifulSoup
 
@@ -124,7 +124,11 @@ def load_sync_state(output_dir: Path) -> dict:
     path = output_dir / SYNC_STATE_FILE
     if not path.exists():
         return {'version': SYNC_STATE_VERSION, 'last_sync': None, 'pages': {}}
-    data = json.loads(path.read_text(encoding='utf-8'))
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"  WARNING: Corrupt sync state, starting fresh: {e}", file=sys.stderr)
+        return {'version': SYNC_STATE_VERSION, 'last_sync': None, 'pages': {}}
     return data
 
 
@@ -184,7 +188,6 @@ def generate_export_script(temp_dir: Path, page_ids: list[str] | None = None) ->
     """Generate a PowerShell script that exports hierarchy and page content."""
     # Use single-quoted string in PowerShell (no variable/subexpression expansion)
     temp_dir_ps = str(temp_dir).replace("'", "''")
-    temp_dir_escaped = str(temp_dir).replace('\\', '\\\\')
 
     if page_ids:
         validated_ids = [_validate_page_id(pid) for pid in page_ids]
@@ -342,7 +345,7 @@ def _parse_container(elem, container):
         for page in sec.findall('one:Page', NS):
             section['pages'].append({
                 'id': page.get('ID'),
-                'name': page.get('name') or 'Untitled',
+                'name': (page.get('name') or 'Untitled').strip(),
                 'level': int(page.get('pageLevel', '1')),
                 'created': page.get('dateTime', ''),
                 'modified': page.get('lastModifiedTime', ''),
@@ -505,7 +508,16 @@ def convert_page_xml(xml_path: Path, page_info: dict, skip_images: bool = False,
     """Convert OneNote page XML to Markdown string + dict of images."""
     global _current_page_id_map, _current_checkbox_tag_indices, _current_monospace_styles
     _current_page_id_map = page_id_map
+    try:
+        return _convert_page_xml_inner(xml_path, page_info, skip_images)
+    finally:
+        _current_page_id_map = None
+        _current_checkbox_tag_indices = set()
+        _current_monospace_styles = set()
 
+
+def _convert_page_xml_inner(xml_path: Path, page_info: dict, skip_images: bool) -> tuple[str, dict]:
+    """Inner conversion logic for convert_page_xml."""
     tree = ET.parse(xml_path)
     root = tree.getroot()
 
@@ -523,9 +535,10 @@ def convert_page_xml(xml_path: Path, page_info: dict, skip_images: bool = False,
         if font and any(mono in font for mono in _MONOSPACE_FONTS):
             monospace_styles.add(idx)
 
+    global _current_monospace_styles
     _current_monospace_styles = monospace_styles
 
-    # Identify which tag indices are checkboxes (To-Do)
+    global _current_checkbox_tag_indices
     _current_checkbox_tag_indices = set()
     for tag_def in root.findall('one:TagDef', ns):
         tag_type = tag_def.get('type', '')
@@ -615,9 +628,6 @@ def convert_page_xml(xml_path: Path, page_info: dict, skip_images: bool = False,
 
     markdown = '\n'.join(lines)
     markdown = re.sub(r'\n{3,}', '\n\n', markdown)
-    _current_page_id_map = None
-    _current_checkbox_tag_indices = set()
-    _current_monospace_styles = set()
     return markdown, images
 
 
@@ -1062,10 +1072,22 @@ def compute_output_path(page_info: dict, vault_mode: str) -> str:
 # ============================================================================
 
 def _split_frontmatter(markdown: str) -> tuple[str, str]:
-    """Split markdown into (frontmatter, body). Frontmatter includes the --- delimiters."""
+    """Split markdown into (frontmatter + title heading, body).
+
+    Returns everything up to and including the first H1 heading as 'frontmatter'
+    so auto-wikify and entity linking don't touch the title.
+    """
     if not markdown.startswith('---'):
         return '', markdown
-    end_idx = markdown.index('---', 3) + 3
+    close = markdown.find('---', 3)
+    if close == -1:
+        return '', markdown
+    end_idx = close + 3
+    rest = markdown[end_idx:]
+    # Also protect the first H1 heading (page title)
+    title_match = re.match(r'(\s*# [^\n]*\n)', rest)
+    if title_match:
+        end_idx += title_match.end()
     return markdown[:end_idx], markdown[end_idx:]
 
 
@@ -1077,6 +1099,11 @@ _GENERIC_PAGE_NAMES = {
     'methods', 'background', 'conclusion', 'references', 'appendix',
     'agenda', 'minutes', 'action', 'update', 'status', 'plan',
     'clinical', 'data', 'analysis', 'review', 'report', 'template',
+    'january', 'february', 'march', 'april', 'may', 'june',
+    'july', 'august', 'september', 'october', 'november', 'december',
+    'meetings', 'projects', 'tasks', 'inbox', 'archive', 'resources',
+    'links', 'ideas', 'drafts', 'contacts', 'people', 'tools',
+    'to meet', 'to do', 'to read', 'to review', 'to discuss',
 }
 
 _DOUBLE_BRACKET_RE = re.compile(r'\[\[\[\[([^\[\]]+)\]\]\]\]')
@@ -1225,7 +1252,7 @@ def _inject_entities(markdown: str, entities_dict: dict) -> str:
         closing_idx -= 1
 
     entity_lines = ['entities:']
-    for entity_type in ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles'):
+    for entity_type in ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles', 'methods'):
         items = entities_dict.get(entity_type, [])
         if items:
             entity_lines.append(f'  {entity_type}:')
@@ -1251,7 +1278,7 @@ def _wikify_entities(markdown: str, entities_dict: dict) -> str:
 
     # Collect all entity names to wikify
     entity_names = set()
-    for entity_type in ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles'):
+    for entity_type in ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles', 'methods'):
         for name in entities_dict.get(entity_type, []):
             if len(name) > 2:
                 entity_names.add(name)
@@ -1894,9 +1921,9 @@ Write-Output "DONE"
             actions = determine_actions(state, all_pages, args)
 
         # Build page ID → name map for resolving onenote:// links
-        page_id_map = {p['id']: p['name'] for p in all_pages}
+        page_id_map = {p['id']: p['name'].strip() for p in all_pages}
         # Build set of all page names for auto-wikilinks
-        all_page_names = {p['name'] for p in all_pages}
+        all_page_names = {p['name'].strip() for p in all_pages}
 
         if args.dry_run:
             print_dry_run(actions, state)

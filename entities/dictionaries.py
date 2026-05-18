@@ -27,6 +27,9 @@ class EntityDictionaries:
     # company_variants: variant_name (lowercase) -> canonical_name
     company_variants: dict[str, str] = field(default_factory=dict)
 
+    # method_variants: variant_name (lowercase) -> canonical_name
+    method_variants: dict[str, str] = field(default_factory=dict)
+
     # Short gene symbols (<=3 chars) that need context validation
     short_gene_symbols: set[str] = field(default_factory=set)
 
@@ -91,6 +94,17 @@ def load_dictionaries() -> EntityDictionaries:
         logger.debug(f"Loaded {len(dicts.company_variants)} company name variants")
     else:
         logger.warning(f"Companies file not found: {companies_path}")
+
+    # Load methods/technologies
+    methods_path = DATA_DIR / 'methods.yaml'
+    if methods_path.exists():
+        with open(methods_path, encoding='utf-8') as f:
+            methods_data = yaml.safe_load(f) or {}
+        for canonical, variants in methods_data.items():
+            if isinstance(variants, list):
+                for v in variants:
+                    dicts.method_variants[v.lower()] = canonical
+        logger.debug(f"Loaded {len(dicts.method_variants)} method name variants")
 
     _cached_dictionaries = dicts
     return dicts

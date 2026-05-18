@@ -1,0 +1,151 @@
+# Experimental methods, technologies, and computational approaches
+# Format: canonical_name: [list of variant spellings (lowercase)]
+
+# Sequencing methods
+ChIP-seq:
+  - chip-seq
+  - chipseq
+  - "chip seq"
+
+CUT&Tag:
+  - "cut&tag"
+  - "cut and tag"
+  - cuttag
+
+ATAC-seq:
+  - atac-seq
+  - atacseq
+  - "atac seq"
+
+scRNA-seq:
+  - scrna-seq
+  - scrnaseq
+  - "single-cell rna-seq"
+  - "single cell rna-seq"
+  - "single cell rna seq"
+
+scATAC-seq:
+  - scatac-seq
+  - scatacseq
+  - "single-cell atac-seq"
+
+Spatial Transcriptomics:
+  - "spatial transcriptomics"
+  - "spatial transcriptomic"
+
+RNA-seq:
+  - rna-seq
+  - rnaseq
+  - "rna seq"
+  - "rna sequencing"
+
+WGS:
+  - wgs
+  - "whole genome sequencing"
+
+WES:
+  - wes
+  - "whole exome sequencing"
+
+Bulk RNA-seq:
+  - "bulk rna-seq"
+  - "bulk rnaseq"
+  - "bulk rna seq"
+
+# Gene editing & screens
+CRISPR:
+  - crispr
+  - "crispr-cas9"
+  - crispr/cas9
+
+Perturb-seq:
+  - perturb-seq
+  - perturbseq
+
+CRISPR screen:
+  - "crispr screen"
+  - "crispr screens"
+
+# Computational methods
+Deep Learning:
+  - "deep learning"
+
+Machine Learning:
+  - "machine learning"
+
+Knowledge Graph:
+  - "knowledge graph"
+  - "knowledge graphs"
+
+Deconvolution:
+  - deconvolution
+
+Clustering:
+  - clustering
+
+Survival Analysis:
+  - "survival analysis"
+
+Differential Expression:
+  - "differential expression"
+  - "differential gene expression"
+
+# Imaging & staining
+IHC:
+  - ihc
+  - immunohistochemistry
+
+IF:
+  - "immunofluorescence"
+
+H&E:
+  - "h&e"
+  - "h&e staining"
+  - "hematoxylin and eosin"
+
+Flow Cytometry:
+  - "flow cytometry"
+  - facs
+
+Multiplex Imaging:
+  - "multiplex imaging"
+  - "multiplex immunofluorescence"
+
+# Protein methods
+Mass Spectrometry:
+  - "mass spectrometry"
+  - "mass spec"
+
+Western Blot:
+  - "western blot"
+  - "western blotting"
+
+# Multi-omics
+Multi-omics:
+  - multi-omics
+  - multiomics
+  - "multi omics"
+
+Proteomics:
+  - proteomics
+
+Metabolomics:
+  - metabolomics
+
+# Data types & assays
+PDX:
+  - pdx
+  - "patient-derived xenograft"
+
+Organoid:
+  - organoid
+  - organoids
+
+CiteSeq:
+  - citeseq
+  - cite-seq
+  - "cite seq"
+
+V(D)J:
+  - "v(d)j"
+  - vdj

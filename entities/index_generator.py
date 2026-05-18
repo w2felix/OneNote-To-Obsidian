@@ -5,6 +5,7 @@ each containing a Dataview query that lists all pages mentioning that entity.
 """
 
 import logging
+import re
 from pathlib import Path
 
 from entities.dictionaries import load_dictionaries
@@ -34,6 +35,7 @@ def generate_entity_index(output_dir: Path, state: dict):
         'compounds': {},
         'companies': {},
         'roles': {},
+        'methods': {},
     }
 
     for page_key, page_data in entities_state.items():
@@ -65,7 +67,6 @@ def generate_entity_index(output_dir: Path, state: dict):
 
 def _safe_filename(name: str) -> str:
     """Make a filename safe for all platforms."""
-    import re
     safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', name)
     return safe.strip('. ')[:100] or 'unnamed'
 

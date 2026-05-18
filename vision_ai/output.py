@@ -94,8 +94,9 @@ def _build_frontmatter(result: AnalysisResult, group, model: str = None) -> str:
 
     # Standard metadata
     lines.append(f'source_type: {group.worker_type}')
-    source_files_yaml = '\n'.join(f'  - "{f}"' for f in group.filenames)
-    lines.append(f'source_files:\n{source_files_yaml}')
+    lines.append('source_files:')
+    for f in group.filenames:
+        lines.append(f'  - "{f}"')
     lines.append(f'vision_model: {model or VISION_MODEL}')
     lines.append(f'analyzed: {datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}')
     if group.context:
