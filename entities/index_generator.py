@@ -40,6 +40,7 @@ def generate_entity_index(output_dir: Path, state: dict):
         'cell_lines': {},
         'conferences': {},
         'pathways': {},
+        'departments': {},
     }
 
     for page_key, page_data in entities_state.items():
@@ -111,6 +112,16 @@ def _build_entity_page(name: str, entity_type: str, mention_count: int,
             for k, v in compound_info.items():
                 lines.append(f'{k}: "{v}"')
 
+    elif entity_type == 'companies':
+        parent = dicts.company_parents.get(name)
+        if parent:
+            lines.append(f'parent_company: "{parent}"')
+        children = [c for c, p in dicts.company_parents.items() if p == name]
+        if children:
+            lines.append('subsidiaries:')
+            for c in sorted(children):
+                lines.append(f'  - "{c}"')
+
     lines.append(f'mention_count: {mention_count}')
     lines.append('auto_generated: true')
     lines.append('---')
@@ -137,6 +148,15 @@ def _build_entity_page(name: str, entity_type: str, mention_count: int,
             if parts:
                 lines.append(f'*{" — ".join(parts)}*')
                 lines.append('')
+    elif entity_type == 'companies':
+        parent = dicts.company_parents.get(name)
+        children = [c for c, p in dicts.company_parents.items() if p == name]
+        if parent:
+            lines.append(f'*Subsidiary of [[{parent}]]*')
+            lines.append('')
+        if children:
+            lines.append('**Subsidiaries:** ' + ', '.join(f'[[{c}]]' for c in sorted(children)))
+            lines.append('')
 
     # Dataview query
     lines.append('## References')

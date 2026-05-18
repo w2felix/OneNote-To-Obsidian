@@ -34,6 +34,7 @@ Return ONLY a JSON object with this structure:
 
 Tag rules:
 - Lowercase, hyphenated (e.g., "machine-learning", "project-alpha")
+- ALWAYS in English, even if the note is in German or another language (e.g., "Chemiker" → "chemistry", "Sequenzierung" → "sequencing")
 - Specific enough to be useful for filtering and discovery
 - NEVER use single common English words as tags (e.g., "research", "summary", "overview", "other", "general", "questions", "data", "analysis", "results", "discussion", "methods")
 - DO include specific platform/tool names when central to the page (e.g., "gitlab", "docker", "nextflow", "rstudio", "jupyter")
@@ -45,7 +46,7 @@ Entity rules:
 - diseases: Use common abbreviations where standard (NSCLC, CRC, AML), otherwise use the full name.
 - compounds: Internal codes matching M followed by 4 digits (e.g., M1774, M3814).
 - companies: Pharma/biotech/diagnostics companies mentioned. Use canonical company names.
-- roles: Organizational titles and positions (e.g., "Principal Scientist", "Associate Director", "Intern", "Group Leader"). Use the title as written.
+- roles: Corporate/organizational job titles only (e.g., "Principal Scientist", "Associate Director", "Intern", "Group Leader", "Head of Data Science"). Do NOT include academic degrees (PhD, MSc), disciplines (Bioinformatics, Biology), or team names as roles.
 - methods: Experimental methods, technologies, and computational approaches (e.g., "scRNA-seq", "CRISPR", "ChIP-seq", "Deep Learning", "Flow Cytometry"). Use canonical names.
 - Only include entities actually mentioned in the text.
 - If no biomedical entities are present, return empty lists."""
@@ -101,7 +102,8 @@ Content:
     # Normalize entity lists
     normalized_entities = {}
     for key in ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles',
-                'methods', 'clinical_trials', 'cell_lines', 'conferences', 'pathways'):
+                'methods', 'clinical_trials', 'cell_lines', 'conferences', 'pathways',
+                'departments'):
         vals = entities.get(key, [])
         if isinstance(vals, list):
             normalized_entities[key] = [str(v).strip() for v in vals if v]

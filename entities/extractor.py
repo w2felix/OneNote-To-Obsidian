@@ -102,33 +102,55 @@ class EntityResult:
     cell_lines: list[EntityMention] = field(default_factory=list)
     conferences: list[EntityMention] = field(default_factory=list)
     pathways: list[EntityMention] = field(default_factory=list)
+    departments: list[EntityMention] = field(default_factory=list)
 
     ENTITY_TYPES = ('genes', 'drugs', 'diseases', 'compounds', 'companies', 'roles',
-                    'methods', 'clinical_trials', 'cell_lines', 'conferences', 'pathways')
+                    'methods', 'clinical_trials', 'cell_lines', 'conferences', 'pathways',
+                    'departments')
 
     def is_empty(self) -> bool:
         return not any(getattr(self, t) for t in self.ENTITY_TYPES)
 
     def merge(self, other: 'EntityResult'):
-        """Merge another EntityResult, deduplicating by canonical name (case-insensitive)."""
+        """Merge another EntityResult, deduplicating by canonical name and ontology ID."""
         for entity_type in self.ENTITY_TYPES:
-            existing = {m.canonical.lower() for m in getattr(self, entity_type)}
+            existing_names = {m.canonical.lower() for m in getattr(self, entity_type)}
+            existing_ids = {m.ontology_id for m in getattr(self, entity_type) if m.ontology_id}
             for m in getattr(other, entity_type):
-                if m.canonical.lower() not in existing:
+                if m.ontology_id and m.ontology_id in existing_ids:
+                    continue
+                if m.canonical.lower() not in existing_names:
                     getattr(self, entity_type).append(m)
-                    existing.add(m.canonical.lower())
+                    existing_names.add(m.canonical.lower())
+                    if m.ontology_id:
+                        existing_ids.add(m.ontology_id)
 
-    def to_dict(self) -> dict:
-        """Serialize for YAML frontmatter and caching."""
+    def to_dict(self, dicts: 'EntityDictionaries | None' = None) -> dict:
+        """Serialize for YAML frontmatter and caching.
+
+        Deduplicates by canonical name (case-insensitive) and by ontology ID
+        for diseases (so 'breast cancer' and 'breast carcinoma' collapse to one).
+        """
         result = {}
         for entity_type in self.ENTITY_TYPES:
             mentions = getattr(self, entity_type)
             if mentions:
                 seen_lower: dict[str, str] = {}
+                seen_ids: set[str] = set()
                 for m in mentions:
+                    # Resolve ontology_id for diseases without one (e.g. from LLM)
+                    ontology_id = m.ontology_id
+                    if not ontology_id and entity_type == 'diseases' and dicts:
+                        info = dicts.disease_names.get(m.canonical.lower(), {})
+                        if info:
+                            ontology_id = info.get('mondo_id', '')
+                    if ontology_id and ontology_id in seen_ids:
+                        continue
                     key = m.canonical.lower()
                     if key not in seen_lower or m.canonical[0].isupper():
                         seen_lower[key] = m.canonical
+                    if ontology_id:
+                        seen_ids.add(ontology_id)
                 result[entity_type] = sorted(seen_lower.values())
         return result
 
@@ -273,7 +295,7 @@ def _get_disease_word_index(dicts: EntityDictionaries) -> dict[str, list[str]]:
 # Overly generic disease terms to exclude
 _GENERIC_DISEASE_TERMS = {
     'disease', 'syndrome', 'disorder', 'neoplasm', 'infection', 'cancer',
-    'tumor', 'tumour', 'deficiency', 'malformation',
+    'tumor', 'tumour', 'deficiency', 'malformation', 'carcinoma', 'adenocarcinoma',
 }
 
 # Common English words that happen to be MONDO disease keys/synonyms — always skip
@@ -282,7 +304,9 @@ _FALSE_POSITIVE_DISEASES = {
     'stroke', 'tumor', 'ache', 'aged', 'aids', 'bald', 'bent', 'bile',
     'boil', 'clot', 'deaf', 'dull', 'faint', 'flush', 'gait', 'grip',
     'halt', 'haze', 'itch', 'lame', 'lean', 'limp', 'lump', 'mute',
-    'numb', 'pale', 'rash', 'scar', 'sore', 'stiff', 'wart', 'weak',
+    'numb', 'pale', 'scar', 'sore', 'stiff', 'wart', 'weak',
+    'read', 'scan', 'caps', 'face', 'iris', 'lung', 'skin', 'soft',
+    'child', 'mass',
 }
 
 
@@ -378,7 +402,6 @@ ROLE_TITLES = [
     'Senior Vice President', 'Vice President',
     'Project Manager', 'Group Leader', 'Team Lead',
     'Work Student', 'Werkstudent', 'Praktikant', 'Internship', 'Intern',
-    'Head of',
     'SVP', 'CEO', 'COO', 'CTO', 'CFO', 'CSO', 'CMO',
     'Director',
 ]
@@ -389,11 +412,23 @@ ROLE_TITLES.sort(key=len, reverse=True)
 _role_patterns = [(title, re.compile(r'\b' + re.escape(title) + r'\b', re.IGNORECASE))
                   for title in ROLE_TITLES]
 
+_HEAD_OF_RE = re.compile(
+    r'\bHead of ((?:[\w/-]+(?:\s+(?!at\b|in\b|for\b|from\b|since\b|who\b|with\b|is\b|was\b)[\w/-]+){0,5}))',
+    re.IGNORECASE)
+
 
 def _extract_roles(text: str) -> list[EntityMention]:
     """Extract organizational role/title mentions."""
     mentions = []
     seen = set()
+
+    # "Head of X" — capture the full title
+    for match in _HEAD_OF_RE.finditer(text):
+        full_title = 'Head of ' + match.group(1).strip()
+        if full_title not in seen:
+            seen.add(full_title)
+            mentions.append(EntityMention(
+                text=full_title, canonical=full_title, entity_type='role'))
 
     for title, pattern in _role_patterns:
         if pattern.search(text):
@@ -455,11 +490,36 @@ def _extract_cell_lines(text: str, dicts: EntityDictionaries) -> list[EntityMent
     return _extract_from_variants(text.lower(), dicts.cell_line_variants, 'cell_line', min_len=2)
 
 
+_CONFERENCE_CONTEXT_RE = re.compile(
+    r'\b(conference|congress|meeting|symposium|annual|summit)\b', re.IGNORECASE)
+
+
 def _extract_conferences(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
-    """Extract conference/congress names using curated dictionary."""
+    """Extract conference/congress names using curated dictionary.
+
+    Short names (< 4 chars) only match when followed by a conference context word.
+    """
     if not dicts.conference_variants:
         return []
-    return _extract_from_variants(text.lower(), dicts.conference_variants, 'conference', min_len=3)
+
+    mentions = _extract_from_variants(text.lower(), dicts.conference_variants, 'conference', min_len=4)
+    seen = {m.canonical for m in mentions}
+
+    # Second pass: short variants with context validation
+    text_lower = text.lower()
+    for variant, canonical in dicts.conference_variants.items():
+        if len(variant) >= 4 or canonical in seen:
+            continue
+        pattern = re.compile(r'\b' + re.escape(variant) + r'\b')
+        match = pattern.search(text_lower)
+        if match:
+            after = text_lower[match.end():match.end() + 15]
+            if _CONFERENCE_CONTEXT_RE.search(after):
+                seen.add(canonical)
+                mentions.append(EntityMention(
+                    text=variant, canonical=canonical, entity_type='conference'))
+
+    return mentions
 
 
 def _extract_pathways(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
@@ -467,6 +527,13 @@ def _extract_pathways(text: str, dicts: EntityDictionaries) -> list[EntityMentio
     if not dicts.pathway_variants:
         return []
     return _extract_from_variants(text.lower(), dicts.pathway_variants, 'pathway', min_len=3)
+
+
+def _extract_departments(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
+    """Extract internal department/business unit names using curated dictionary."""
+    if not dicts.department_variants:
+        return []
+    return _extract_from_variants(text.lower(), dicts.department_variants, 'department', min_len=3)
 
 
 def extract_entities(text: str, dicts: EntityDictionaries | None = None) -> EntityResult:
@@ -494,4 +561,5 @@ def extract_entities(text: str, dicts: EntityDictionaries | None = None) -> Enti
         cell_lines=_extract_cell_lines(text, dicts),
         conferences=_extract_conferences(text, dicts),
         pathways=_extract_pathways(text, dicts),
+        departments=_extract_departments(text, dicts),
     )

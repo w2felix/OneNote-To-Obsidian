@@ -39,6 +39,11 @@ RNA-seq:
   - "rna seq"
   - "rna sequencing"
 
+NGS:
+  - ngs
+  - "next-generation sequencing"
+  - "next generation sequencing"
+
 WGS:
   - wgs
   - "whole genome sequencing"
@@ -149,3 +154,69 @@ CiteSeq:
 V(D)J:
   - "v(d)j"
   - vdj
+
+# Drug modalities & therapeutic platforms
+ADC:
+  - adc
+  - adcs
+  - "antibody-drug conjugate"
+  - "antibody drug conjugate"
+  - "antibody-drug conjugates"
+  - "antibody drug conjugates"
+
+PROTAC:
+  - protac
+  - protacs
+
+Molecular Glue:
+  - "molecular glue"
+  - "molecular glues"
+
+NCE:
+  - nce
+  - "new chemical entity"
+
+NBE:
+  - nbe
+  - "new biological entity"
+
+Bispecific Antibody:
+  - "bispecific antibody"
+  - "bispecific antibodies"
+  - bispecific
+  - bispecifics
+
+CAR-T:
+  - car-t
+  - "car-t cell"
+  - "car-t cells"
+  - "chimeric antigen receptor"
+
+siRNA:
+  - sirna
+  - "small interfering rna"
+
+ASO:
+  - aso
+  - "antisense oligonucleotide"
+  - "antisense oligonucleotides"
+
+mRNA Therapy:
+  - "mrna therapy"
+  - "mrna therapeutic"
+  - "mrna therapeutics"
+
+Degrader:
+  - degrader
+  - degraders
+
+Checkpoint Inhibitor:
+  - "checkpoint inhibitor"
+  - "checkpoint inhibitors"
+  - "immune checkpoint inhibitor"
+
+Monoclonal Antibody:
+  - "monoclonal antibody"
+  - "monoclonal antibodies"
+  - mab
+  - mabs

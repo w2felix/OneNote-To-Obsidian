@@ -1,152 +1,260 @@
 # Pharma/biotech/diagnostics companies for Tier 1 entity extraction
-# Format: canonical_name: [list of variant spellings (lowercase)]
+# Format:
+#   canonical_name:
+#     variants: [list of variant spellings (lowercase)]
+#     parent: ParentCompany  (optional)
 
 Merck:
-  - merck
-  - "merck kgaa"
-  - merckgroup
+  variants:
+    - merck
+    - "merck kgaa"
+    - merckgroup
+
+Serono:
+  variants:
+    - serono
+    - "emd serono"
+    - "merck serono"
+  parent: Merck
+
+Sigma-Aldrich:
+  variants:
+    - sigma-aldrich
+    - "sigma aldrich"
+    - sigmaaldrich
+  parent: Merck
+
+MilliporeSigma:
+  variants:
+    - milliporesigma
+    - millipore
+  parent: Merck
 
 Tempus:
-  - tempus
-  - "tempus ai"
-  - "tempus labs"
+  variants:
+    - tempus
+    - "tempus ai"
+    - "tempus labs"
 
 Caris:
-  - caris
-  - "caris life sciences"
+  variants:
+    - caris
+    - "caris life sciences"
 
 Roche:
-  - roche
-  - "f. hoffmann-la roche"
-  - genentech
+  variants:
+    - roche
+    - "f. hoffmann-la roche"
+
+Genentech:
+  variants:
+    - genentech
+  parent: Roche
 
 AstraZeneca:
-  - astrazeneca
-  - "astra zeneca"
+  variants:
+    - astrazeneca
+    - "astra zeneca"
+
+MedImmune:
+  variants:
+    - medimmune
+  parent: AstraZeneca
 
 Novartis:
-  - novartis
-  - "novartis pharma"
+  variants:
+    - novartis
+    - "novartis pharma"
 
 Pfizer:
-  - pfizer
+  variants:
+    - pfizer
 
 Bristol-Myers Squibb:
-  - "bristol-myers squibb"
-  - "bristol myers squibb"
-  - bms
+  variants:
+    - "bristol-myers squibb"
+    - "bristol myers squibb"
+    - bms
+
+Celgene:
+  variants:
+    - celgene
+  parent: Bristol-Myers Squibb
 
 Eli Lilly:
-  - "eli lilly"
-  - lilly
+  variants:
+    - "eli lilly"
+    - lilly
 
 Johnson & Johnson:
-  - "johnson & johnson"
-  - "johnson and johnson"
-  - janssen
+  variants:
+    - "johnson & johnson"
+    - "johnson and johnson"
+
+Janssen:
+  variants:
+    - janssen
+    - "janssen pharmaceuticals"
+  parent: Johnson & Johnson
 
 Sanofi:
-  - sanofi
-  - "sanofi aventis"
-
-Amgen:
-  - amgen
-
-Gilead:
-  - gilead
-  - "gilead sciences"
-
-AbbVie:
-  - abbvie
+  variants:
+    - sanofi
+    - "sanofi aventis"
 
 Regeneron:
-  - regeneron
+  variants:
+    - regeneron
+
+Amgen:
+  variants:
+    - amgen
+
+Gilead:
+  variants:
+    - gilead
+    - "gilead sciences"
+
+AbbVie:
+  variants:
+    - abbvie
 
 Daiichi Sankyo:
-  - "daiichi sankyo"
-  - daiichi
+  variants:
+    - "daiichi sankyo"
+    - daiichi
 
 Seagen:
-  - seagen
+  variants:
+    - seagen
+  parent: Pfizer
 
 Takeda:
-  - takeda
+  variants:
+    - takeda
 
 Bayer:
-  - bayer
-  - "bayer pharma"
+  variants:
+    - bayer
+    - "bayer pharma"
 
 Boehringer Ingelheim:
-  - "boehringer ingelheim"
-  - boehringer
+  variants:
+    - "boehringer ingelheim"
+    - boehringer
 
 GSK:
-  - gsk
-  - glaxosmithkline
-  - "glaxo smithkline"
+  variants:
+    - gsk
+    - glaxosmithkline
+    - "glaxo smithkline"
 
 Moderna:
-  - moderna
+  variants:
+    - moderna
 
 BioNTech:
-  - biontech
+  variants:
+    - biontech
 
 Illumina:
-  - illumina
+  variants:
+    - illumina
 
 Foundation Medicine:
-  - "foundation medicine"
-  - foundationone
+  variants:
+    - "foundation medicine"
+    - foundationone
+  parent: Roche
 
 Guardant Health:
-  - "guardant health"
-  - guardant
+  variants:
+    - "guardant health"
+    - guardant
 
 Myriad Genetics:
-  - "myriad genetics"
-  - myriad
+  variants:
+    - "myriad genetics"
+    - myriad
 
 NeoGenomics:
-  - neogenomics
+  variants:
+    - neogenomics
 
 Ventana:
-  - ventana
-  - "ventana medical systems"
+  variants:
+    - ventana
+    - "ventana medical systems"
+  parent: Roche
 
 Agilent:
-  - agilent
-  - "agilent technologies"
+  variants:
+    - agilent
+    - "agilent technologies"
 
 10x Genomics:
-  - "10x genomics"
+  variants:
+    - "10x genomics"
 
 Incyte:
-  - incyte
+  variants:
+    - incyte
 
 Springworks:
-  - springworks
-  - "springworks therapeutics"
+  variants:
+    - springworks
+    - "springworks therapeutics"
 
 Mirati:
-  - mirati
-  - "mirati therapeutics"
+  variants:
+    - mirati
+    - "mirati therapeutics"
 
 Genome & Company:
-  - "genome & company"
-  - "genome and company"
+  variants:
+    - "genome & company"
+    - "genome and company"
 
 GenomeOncology:
-  - genomeoncology
-  - "genome oncology"
+  variants:
+    - genomeoncology
+    - "genome oncology"
 
 Tacylix:
-  - tacylix
+  variants:
+    - tacylix
 
 Memorial Sloan Kettering Cancer Center:
-  - "memorial sloan kettering"
-  - mskcc
-  - "sloan kettering"
+  variants:
+    - "memorial sloan kettering"
+    - mskcc
+    - "sloan kettering"
 
 Sarah Cannon Research Institute:
-  - "sarah cannon research institute"
-  - "sarah cannon"
+  variants:
+    - "sarah cannon research institute"
+    - "sarah cannon"
+
+DKFZ:
+  variants:
+    - dkfz
+    - "deutsches krebsforschungszentrum"
+    - "german cancer research center"
+
+EMBL:
+  variants:
+    - embl
+    - "european molecular biology laboratory"
+
+MFPL:
+  variants:
+    - mfpl
+    - "max f. perutz laboratories"
+    - "max perutz labs"
+
+Max Planck Institute:
+  variants:
+    - "max planck"
+    - "max-planck"
+    - "max planck institute"
+    - mpi

@@ -26,6 +26,8 @@ class EntityDictionaries:
 
     # company_variants: variant_name (lowercase) -> canonical_name
     company_variants: dict[str, str] = field(default_factory=dict)
+    # company_parents: canonical_name -> parent canonical_name
+    company_parents: dict[str, str] = field(default_factory=dict)
 
     # method_variants: variant_name (lowercase) -> canonical_name
     method_variants: dict[str, str] = field(default_factory=dict)
@@ -41,6 +43,9 @@ class EntityDictionaries:
 
     # pathway_variants: variant_name (lowercase) -> canonical_name
     pathway_variants: dict[str, str] = field(default_factory=dict)
+
+    # department_variants: variant_name (lowercase) -> canonical_name
+    department_variants: dict[str, str] = field(default_factory=dict)
 
     # Short gene symbols (<=3 chars) that need context validation
     short_gene_symbols: set[str] = field(default_factory=set)
@@ -99,11 +104,18 @@ def load_dictionaries() -> EntityDictionaries:
     if companies_path.exists():
         with open(companies_path, encoding='utf-8') as f:
             companies_data = yaml.safe_load(f) or {}
-        for canonical, variants in companies_data.items():
-            if isinstance(variants, list):
-                for v in variants:
+        for canonical, entry in companies_data.items():
+            if isinstance(entry, dict):
+                for v in entry.get('variants', []):
                     dicts.company_variants[v.lower()] = canonical
-        logger.debug(f"Loaded {len(dicts.company_variants)} company name variants")
+                parent = entry.get('parent')
+                if parent:
+                    dicts.company_parents[canonical] = parent
+            elif isinstance(entry, list):
+                for v in entry:
+                    dicts.company_variants[v.lower()] = canonical
+        logger.debug(f"Loaded {len(dicts.company_variants)} company name variants, "
+                     f"{len(dicts.company_parents)} parent relationships")
     else:
         logger.warning(f"Companies file not found: {companies_path}")
 
@@ -161,6 +173,17 @@ def load_dictionaries() -> EntityDictionaries:
                 for v in variants:
                     dicts.pathway_variants[v.lower()] = canonical
         logger.debug(f"Loaded {len(dicts.pathway_variants)} pathway variants")
+
+    # Load departments
+    departments_path = DATA_DIR / 'departments.yaml'
+    if departments_path.exists():
+        with open(departments_path, encoding='utf-8') as f:
+            departments_data = yaml.safe_load(f) or {}
+        for canonical, variants in departments_data.items():
+            if isinstance(variants, list):
+                for v in variants:
+                    dicts.department_variants[v.lower()] = canonical
+        logger.debug(f"Loaded {len(dicts.department_variants)} department variants")
 
     _cached_dictionaries = dicts
     return dicts

@@ -15,6 +15,7 @@ MIN_WORD_COUNT = 50
 SYSTEM_PROMPT = """You are a knowledge-base taxonomist. Given this note, return 3-7 topic tags.
 Rules:
 - Lowercase, hyphenated (e.g., "machine-learning", "project-alpha")
+- ALWAYS in English, even if the note is in German or another language (e.g., "Chemiker" → "chemistry", "Sequenzierung" → "sequencing")
 - Specific enough to be useful for filtering and discovery
 - NEVER use single common English words as tags (e.g., "research", "summary", "overview", "other", "general", "questions", "data", "analysis", "results", "discussion", "methods")
 - DO include specific platform/tool names when central to the page (e.g., "gitlab", "docker", "nextflow", "rstudio", "jupyter")
