@@ -47,7 +47,7 @@ FALSE_POSITIVE_GENES = {
     'QD', 'IV', 'SC', 'PO', 'IM', 'IT', 'IP', 'QC', 'APOLLO',
     'CS', 'ET', 'AM', 'PM', 'SCT',
     'DMPK', 'MPI', 'EMD', 'GLP', 'KO', 'PI', 'EMT', 'STAT', 'EST', 'HIPPO',
-    'ILD', 'IC',
+    'ILD', 'IC', 'API', 'RCC',
     'ACE', 'BIN', 'ADD', 'BIG', 'BIT', 'BOX', 'BUS', 'CAR', 'CAT', 'COG',
     'COW', 'CRY', 'CUP', 'DAD', 'DAY', 'DIG', 'DIM', 'DOG', 'DOT', 'DRY',
     'DUG', 'EAR', 'EAT', 'EGG', 'ERA', 'EVE', 'EYE', 'FAD', 'FAT', 'FEW',
