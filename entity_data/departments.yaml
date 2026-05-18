@@ -39,3 +39,18 @@ CBD:
 IC:
   - "innovation cluster"
   - "innovation clusters"
+
+CMS:
+  - cms
+  - "computational molecular sciences"
+
+SRO:
+  - sro
+  - "strategic research operations"
+
+OIO:
+  - oio
+  - "oncology immuno-oncology"
+
+iONC:
+  - ionc

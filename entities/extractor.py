@@ -47,7 +47,7 @@ FALSE_POSITIVE_GENES = {
     'QD', 'IV', 'SC', 'PO', 'IM', 'IT', 'IP', 'QC', 'APOLLO',
     'CS', 'ET', 'AM', 'PM', 'SCT',
     'DMPK', 'MPI', 'EMD', 'GLP', 'KO', 'PI', 'EMT', 'STAT', 'EST', 'HIPPO',
-    'ILD', 'IC', 'API', 'RCC',
+    'ILD', 'IC', 'API', 'RCC', 'CMS',
     'ACE', 'BIN', 'ADD', 'BIG', 'BIT', 'BOX', 'BUS', 'CAR', 'CAT', 'COG',
     'COW', 'CRY', 'CUP', 'DAD', 'DAY', 'DIG', 'DIM', 'DOG', 'DOT', 'DRY',
     'DUG', 'EAR', 'EAT', 'EGG', 'ERA', 'EVE', 'EYE', 'FAD', 'FAT', 'FEW',
@@ -344,6 +344,8 @@ _FALSE_POSITIVE_DISEASES = {
     # Short common words matching rare disease synonyms (TRAPS, PARK, etc.)
     'dass', 'traps', 'trap', 'park', 'mono', 'fallen', 'fast', 'still',
     'part', 'rest', 'cast', 'cord', 'ring', 'crest', 'charge',
+    # Project/tool names that match rare disease acronyms
+    'canvas',
 }
 
 

@@ -224,3 +224,40 @@ Monoclonal Antibody:
   - "monoclonal antibodies"
   - mab
   - mabs
+
+# Drug development pipeline phases / decision points
+Concept Phase:
+  - "concept phase"
+  - "concept stage"
+
+DPHD:
+  - dphd
+  - "decision point hit to drug"
+
+DPHO:
+  - dpho
+  - "decision point hit to optimization"
+
+DPLO:
+  - dplo
+  - "decision point lead optimization"
+
+DPED:
+  - dped
+  - "decision point early development"
+
+DP0:
+  - dp0
+  - "decision point 0"
+
+DP1:
+  - dp1
+  - "decision point 1"
+
+DP2:
+  - dp2
+  - "decision point 2"
+
+DP3:
+  - dp3
+  - "decision point 3"
