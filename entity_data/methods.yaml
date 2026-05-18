@@ -57,6 +57,10 @@ Bulk RNA-seq:
   - "bulk rnaseq"
   - "bulk rna seq"
 
+SCTransform:
+  - sctransform
+  - sct
+
 # Gene editing & screens
 CRISPR:
   - crispr
