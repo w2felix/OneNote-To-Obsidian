@@ -13,10 +13,18 @@ Set up Tesseract manually (no admin rights):
 import argparse
 import hashlib
 import os
+import ssl
 import subprocess
 import sys
 import urllib.request
 from pathlib import Path
+
+# Use Windows system certificate store so corporate proxy CAs are trusted
+_ssl_context = ssl.create_default_context()
+_ssl_context.load_default_certs()
+urllib.request.install_opener(
+    urllib.request.build_opener(urllib.request.HTTPSHandler(context=_ssl_context))
+)
 
 DATA_DIR = Path(__file__).parent / 'entity_data'
 REQUIREMENTS_TXT = Path(__file__).parent / 'requirements.txt'
