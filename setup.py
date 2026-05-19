@@ -134,15 +134,17 @@ def warn_no_conda():
 def find_tesseract() -> Path | None:
     """Search common locations for the Tesseract binary."""
     # Check PATH first
-    result = subprocess.run(
-        ['tesseract', '--version'], capture_output=True, text=True)
-    if result.returncode == 0:
-        # Find the actual path
-        where = subprocess.run(
-            ['where', 'tesseract'], capture_output=True, text=True)
-        if where.returncode == 0:
-            return Path(where.stdout.strip().splitlines()[0]).parent
-        return Path('tesseract')  # In PATH but can't resolve directory
+    try:
+        result = subprocess.run(
+            ['tesseract', '--version'], capture_output=True, text=True)
+        if result.returncode == 0:
+            where = subprocess.run(
+                ['where', 'tesseract'], capture_output=True, text=True)
+            if where.returncode == 0:
+                return Path(where.stdout.strip().splitlines()[0]).parent
+            return Path('tesseract')  # In PATH but can't resolve directory
+    except FileNotFoundError:
+        pass
 
     # Search known locations
     for search_path in TESSERACT_SEARCH_PATHS:
@@ -279,6 +281,28 @@ def setup_tesseract_manual():
         print(f'    python setup.py --setup-tesseract --tesseract-path "C:\\path\\to\\Tesseract-OCR"')
 
 
+def find_tessdata(tesseract_dir: Path) -> Path | None:
+    """Search for the tessdata directory relative to the Tesseract binary.
+
+    Sync with: vision_ai/ocr_utils.py:_find_tessdata (kept separate because
+    setup.py must remain standalone — it runs before the package is importable).
+    """
+    candidates = [
+        tesseract_dir / 'tessdata',
+        tesseract_dir.parent / 'tessdata',
+        tesseract_dir.parent / 'share' / 'tessdata',
+        tesseract_dir / 'share' / 'tessdata',
+    ]
+    for candidate in candidates:
+        if candidate.exists() and (candidate / 'eng.traineddata').exists():
+            return candidate
+    # Fallback: directory exists but no eng.traineddata
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def configure_tesseract_path(tesseract_dir: Path):
     """Configure PATH and TESSDATA_PREFIX for Tesseract."""
     tesseract_dir = Path(tesseract_dir)
@@ -289,27 +313,37 @@ def configure_tesseract_path(tesseract_dir: Path):
     # Add to User PATH
     add_to_user_path(dir_str)
 
-    # Set TESSDATA_PREFIX
-    tessdata = tesseract_dir / 'tessdata'
-    if tessdata.exists():
+    # Set TESSDATA_PREFIX — search multiple locations
+    tessdata = find_tessdata(tesseract_dir)
+    if tessdata:
         set_user_env_var('TESSDATA_PREFIX', str(tessdata))
         os.environ['TESSDATA_PREFIX'] = str(tessdata)
         print(f'  Set TESSDATA_PREFIX = {tessdata}')
+        if not (tessdata / 'eng.traineddata').exists():
+            print(f'  [!] Warning: eng.traineddata not found in {tessdata}')
+            print(f'      OCR will fail until English language data is installed.')
+    else:
+        print(f'  [!] Warning: tessdata directory not found near {dir_str}')
+        print(f'      Searched: <dir>/tessdata, <dir>/../tessdata, <dir>/../share/tessdata')
+        print(f'      Set TESSDATA_PREFIX manually to your tessdata folder.')
 
     # Also set for current process
     os.environ['PATH'] = dir_str + ';' + os.environ.get('PATH', '')
 
     # Verify
-    result = subprocess.run(
-        [str(tesseract_dir / 'tesseract.exe'), '--version'],
-        capture_output=True, text=True,
-    )
-    if result.returncode == 0:
-        version = result.stdout.splitlines()[0] if result.stdout else 'unknown'
-        print(f'  Tesseract version: {version}')
-        print(f'\n  NOTE: Restart your terminal for PATH changes to take effect.')
-    else:
-        print(f'  [!] Could not verify Tesseract. Check the installation.')
+    try:
+        result = subprocess.run(
+            [str(tesseract_dir / 'tesseract.exe'), '--version'],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            version = result.stdout.splitlines()[0] if result.stdout else 'unknown'
+            print(f'  Tesseract version: {version}')
+            print(f'\n  NOTE: Restart your terminal for PATH changes to take effect.')
+        else:
+            print(f'  [!] Could not verify Tesseract. Check the installation.')
+    except (FileNotFoundError, OSError):
+        print(f'  [!] Could not run tesseract.exe at {tesseract_dir}. Check the installation.')
 
 
 def setup_tesseract_conda(conda: str):
@@ -396,25 +430,26 @@ def verify():
         else:
             print(f'  [!] {name} packages: some missing — {result.stderr.strip()[:120]}')
 
-    # Functional Tesseract test
-    ocr_test = (
-        'from PIL import Image, ImageDraw; import pytesseract; '
-        'img = Image.new("RGB", (200, 50), color="white"); '
-        'ImageDraw.Draw(img).text((10, 10), "OCR test", fill="black"); '
-        'pytesseract.image_to_string(img); '
-        'print("  Tesseract OCR: working")'
-    )
-    result = subprocess.run([sys.executable, '-c', ocr_test], capture_output=True, text=True)
-    if result.returncode == 0:
-        print(result.stdout.strip())
-    else:
-        tess_path = find_tesseract()
-        if tess_path:
-            print(f'  [!] Tesseract found at {tess_path} but OCR test failed.')
-            print(f'      {result.stderr.strip()[:200]}')
+    # Functional Tesseract test (uses the same runtime path as onenote_to_obsidian)
+    try:
+        from PIL import Image, ImageDraw
+        from vision_ai.ocr_utils import ocr_image
+        img = Image.new('RGB', (200, 50), color='white')
+        ImageDraw.Draw(img).text((10, 10), 'OCR test', fill='black')
+        text = ocr_image(img)
+        if text:
+            print('  Tesseract OCR: working')
         else:
-            print('  [!] Tesseract not found — OCR will be skipped (screenshot text extraction disabled)')
-            print('      Run: python setup.py --setup-tesseract')
+            tess_path = find_tesseract()
+            if tess_path:
+                print(f'  [!] Tesseract found at {tess_path} but OCR returned no text.')
+                print(f'      TESSDATA_PREFIX: {os.environ.get("TESSDATA_PREFIX", "(not set)")}')
+                print(f'      Ensure eng.traineddata exists in your tessdata folder.')
+            else:
+                print('  [!] Tesseract not found — OCR will be skipped')
+                print('      Run: python setup.py --setup-tesseract')
+    except Exception as e:
+        print(f'  [!] Tesseract OCR test failed: {e}')
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────

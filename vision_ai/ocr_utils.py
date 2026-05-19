@@ -27,8 +27,34 @@ def _check_tesseract():
     return _tesseract_available
 
 
+def _find_tessdata(tesseract_dir):
+    """Search for tessdata directory relative to a tesseract installation.
+
+    Sync with: setup.py:find_tessdata (returns Path; kept separate because
+    setup.py must remain standalone).
+    """
+    from pathlib import Path
+    tesseract_dir = Path(tesseract_dir)
+    candidates = [
+        tesseract_dir / 'tessdata',
+        tesseract_dir.parent / 'tessdata',
+        tesseract_dir.parent / 'share' / 'tessdata',
+        tesseract_dir / 'share' / 'tessdata',
+    ]
+    for candidate in candidates:
+        if candidate.exists() and (candidate / 'eng.traineddata').exists():
+            return str(candidate)
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
 def _configure_tesseract_path(pytesseract):
     """Set pytesseract.tesseract_cmd and TESSDATA_PREFIX if not already in PATH."""
+    from pathlib import Path
+    import subprocess
+
     # Try conda environment first
     conda_prefix = os.environ.get('CONDA_PREFIX')
     if conda_prefix and not os.environ.get('TESSDATA_PREFIX'):
@@ -36,12 +62,21 @@ def _configure_tesseract_path(pytesseract):
         if os.path.exists(tessdata_dir):
             os.environ['TESSDATA_PREFIX'] = tessdata_dir
 
-    # If tesseract is already findable, nothing to do
-    from pathlib import Path
-    import subprocess
-    result = subprocess.run(
-        ['tesseract', '--version'], capture_output=True, text=True)
-    if result.returncode == 0:
+    # If tesseract is already findable, ensure TESSDATA_PREFIX is set
+    try:
+        result = subprocess.run(
+            ['tesseract', '--version'], capture_output=True, text=True)
+    except FileNotFoundError:
+        result = None
+    if result and result.returncode == 0:
+        if not os.environ.get('TESSDATA_PREFIX'):
+            where = subprocess.run(
+                ['where', 'tesseract'], capture_output=True, text=True)
+            if where.returncode == 0:
+                tess_dir = Path(where.stdout.strip().splitlines()[0]).parent
+                tessdata = _find_tessdata(tess_dir)
+                if tessdata:
+                    os.environ['TESSDATA_PREFIX'] = tessdata
         return
 
     # Search common no-admin-install locations
@@ -57,9 +92,9 @@ def _configure_tesseract_path(pytesseract):
         candidate = search_path / 'tesseract.exe'
         if candidate.exists():
             pytesseract.tesseract_cmd = str(candidate)
-            tessdata = search_path / 'tessdata'
-            if tessdata.exists() and not os.environ.get('TESSDATA_PREFIX'):
-                os.environ['TESSDATA_PREFIX'] = str(tessdata)
+            tessdata = _find_tessdata(search_path)
+            if tessdata and not os.environ.get('TESSDATA_PREFIX'):
+                os.environ['TESSDATA_PREFIX'] = tessdata
             logger.debug(f"Found Tesseract at: {candidate}")
             return
 
