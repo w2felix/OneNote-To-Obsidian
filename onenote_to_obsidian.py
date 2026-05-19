@@ -628,10 +628,102 @@ def _convert_page_xml_inner(xml_path: Path, page_info: dict, skip_images: bool) 
 
     markdown = '\n'.join(lines)
     markdown = re.sub(r'\n{3,}', '\n\n', markdown)
-    # Convert escaped hash separators (e.g. \#\#\#\#\#...) to horizontal rules
-    _hash_sep = '(' + re.escape('\\#') + '){4,}'
-    markdown = re.sub('^' + _hash_sep + r'\s*$', '---', markdown, flags=re.MULTILINE)
+    markdown = _HASH_SEP_RE.sub('---', markdown)
+    # Convert OneNote citation format "From <[URL](URL)\>" to markdown source link
+    markdown = re.sub(
+        r'From <\[([^\]]+)\]\((.+?)\)\\?>',
+        r'Source: [\1](\2)',
+        markdown,
+    )
+    # Rescue undetected code: consecutive escaped lines that look like R/Python code
+    markdown = _rescue_code_blocks(markdown)
     return markdown, images
+
+
+_CODE_RESCUE_RE = re.compile(
+    r'\w+\s*<-\s'
+    r'|%>%'
+    r'|\bc\('
+    r'|\blibrary\('
+    r'|\bimport\s'
+    r'|\bdef\s'
+    r'|\bfunction\s*\('
+    r'|\\#.*\\#'
+)
+
+
+def _rescue_code_blocks(markdown: str) -> str:
+    """Detect consecutive lines with code patterns outside fences and wrap them."""
+    if not _CODE_RESCUE_RE.search(markdown):
+        return markdown
+    lines = markdown.split('\n')
+    result = []
+    in_fence = False
+    code_buf = []
+
+    def _flush_code(buf):
+        if len(buf) >= 2:
+            result.append('```')
+            for ln in buf:
+                result.append(_unescape_code_line(ln))
+            result.append('```')
+        else:
+            result.extend(buf)
+
+    for line in lines:
+        if line.startswith('```'):
+            if code_buf:
+                _flush_code(code_buf)
+                code_buf = []
+            in_fence = not in_fence
+            result.append(line)
+            continue
+
+        if in_fence:
+            result.append(line)
+            continue
+
+        if _CODE_RESCUE_RE.search(line) or (code_buf and _looks_like_continuation(line)):
+            code_buf.append(line)
+        else:
+            if code_buf:
+                _flush_code(code_buf)
+                code_buf = []
+            result.append(line)
+
+    if code_buf:
+        _flush_code(code_buf)
+
+    return '\n'.join(result)
+
+
+def _looks_like_continuation(line: str) -> bool:
+    """Check if a line looks like continuation of a code block."""
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if stripped.startswith(('\\#', '#')) and '(' not in stripped:
+        return True
+    if re.search(r'\b\w+\s*(<-|=)\s', stripped):
+        return True
+    if re.search(r'^\w[\w.]+\s*\(', stripped):
+        return True
+    if re.search(r'^\s{4,}', line):
+        return True
+    return False
+
+
+def _unescape_code_line(line: str) -> str:
+    """Remove markdown escaping from a code line."""
+    line = line.replace('\\#', '#')
+    line = line.replace('\\_', '_')
+    line = line.replace('\\*', '*')
+    line = line.replace('\\[', '[')
+    line = line.replace('\\]', ']')
+    line = line.replace('\\`', '`')
+    line = line.replace('\\>', '>')
+    line = line.replace('\\<', '<')
+    return line
 
 
 _CODE_LINE_SENTINEL = '\x00CODE\x00'
@@ -767,6 +859,7 @@ def _convert_oe(oe_elem, ns, style_map, images, skip_images, indent) -> str | No
 
 _MD_ESCAPE_RE = re.compile(r'([\\`*_\[\]~#])')
 _MD_LINE_START_RE = re.compile(r'^(#{1,6}\s|>)', re.MULTILINE)
+_HASH_SEP_RE = re.compile(r'^(\\#){4,}\s*$', re.MULTILINE)
 
 
 def _escape_md_text(text: str) -> str:
@@ -869,9 +962,9 @@ def _process_html_node(node) -> str:
 def _extract_cdata_text(html_text: str) -> str:
     """Extract plain text from CDATA HTML."""
     if '<' not in html_text:
-        return html_text
+        return html.unescape(html_text)
     soup = BeautifulSoup(html_text, 'html.parser')
-    return soup.get_text()
+    return html.unescape(soup.get_text())
 
 
 def _convert_image(image_elem, ns, images: dict) -> str:

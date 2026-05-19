@@ -45,7 +45,7 @@ FALSE_POSITIVE_GENES = {
     'ADC', 'PDX', 'PC', 'NA', 'NAC', 'OR', 'HR', 'CI', 'OS', 'PFS', 'ORR',
     'CR', 'PR', 'SD', 'PD', 'AE', 'SAE', 'DLT', 'MTD', 'RP2D', 'BID',
     'QD', 'IV', 'SC', 'PO', 'IM', 'IT', 'IP', 'QC', 'APOLLO',
-    'CS', 'ET', 'AM', 'PM', 'SCT',
+    'CS', 'ET', 'AM', 'PM', 'SCT', 'S3',
     'DMPK', 'MPI', 'EMD', 'GLP', 'KO', 'PI', 'EMT', 'STAT', 'EST', 'HIPPO',
     'ILD', 'IC', 'API', 'RCC', 'CMS',
     'ACE', 'BIN', 'ADD', 'BIG', 'BIT', 'BOX', 'BUS', 'CAR', 'CAT', 'COG',
@@ -245,8 +245,8 @@ def _extract_genes(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
         if candidate in seen:
             continue
 
-        # Skip known false positives
-        if candidate in FALSE_POSITIVE_GENES:
+        # Skip known false positives (but never suppress always-valid genes)
+        if candidate in FALSE_POSITIVE_GENES and candidate not in ALWAYS_VALID_GENES:
             continue
 
         # Check against HGNC
@@ -278,15 +278,9 @@ def _extract_genes(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
         if canonical != candidate:
             seen.add(canonical)
 
-        # When matched via alias, show as "ALIAS (CANONICAL)" to preserve familiar names
-        if is_alias and candidate != canonical:
-            display = f"{candidate} ({canonical})"
-        else:
-            display = canonical
-
         mentions.append(EntityMention(
             text=candidate,
-            canonical=display,
+            canonical=canonical,
             entity_type='gene',
             ontology_id=hgnc_id,
         ))
@@ -332,18 +326,24 @@ _GENERIC_DISEASE_TERMS = {
     'tumor', 'tumour', 'deficiency', 'malformation', 'carcinoma', 'adenocarcinoma',
 }
 
-# Common English/German words that happen to be MONDO disease keys/synonyms — always skip
+# Words that are MONDO disease keys/synonyms but should NEVER be treated as diseases.
+# Most single-word false positives are caught by the biomedical-context check in
+# _extract_diseases, so this list only needs medical-sounding words that would
+# pass the context check (they appear near biomedical terms but aren't diseases).
 _FALSE_POSITIVE_DISEASES = {
-    'march', 'cold', 'burn', 'rash', 'coma', 'gout', 'acne', 'gerd',
-    'stroke', 'tumor', 'ache', 'aged', 'aids', 'bald', 'bent', 'bile',
-    'boil', 'clot', 'deaf', 'dull', 'faint', 'flush', 'gait', 'grip',
-    'halt', 'haze', 'itch', 'lame', 'lean', 'limp', 'lump', 'mute',
+    # Medical-sounding words that pass context check but aren't diseases
+    'march', 'cold', 'burn', 'rash', 'coma', 'acne', 'gerd',
+    'stroke', 'ache', 'aged', 'aids', 'bile',
+    'boil', 'clot', 'faint', 'flush', 'gait', 'grip',
+    'itch', 'lame', 'limp', 'lump',
     'numb', 'pale', 'scar', 'sore', 'stiff', 'wart', 'weak',
-    'read', 'scan', 'caps', 'face', 'iris', 'lung', 'skin', 'soft',
-    'child', 'mass',
-    # Short common words matching rare disease synonyms (TRAPS, PARK, etc.)
-    'dass', 'traps', 'trap', 'park', 'mono', 'fallen', 'fast', 'still',
-    'part', 'rest', 'cast', 'cord', 'ring', 'crest', 'charge',
+    'scan', 'iris', 'mass', 'mild', 'dose', 'loss', 'gain',
+    # Words often found in biomedical text but not diseases
+    'stem', 'lead', 'risk', 'diet', 'test',
+    # German words that collide with MONDO
+    'dass', 'fallen', 'fast', 'still',
+    # Common words matching rare disease synonyms
+    'traps', 'trap', 'park', 'mono', 'cast', 'cord', 'ring', 'crest', 'charge',
     # Project/tool names that match rare disease acronyms
     'canvas',
 }
@@ -376,6 +376,7 @@ def _extract_diseases(text: str, dicts: EntityDictionaries) -> list[EntityMentio
         # Find a word-boundary-valid occurrence (scan all positions)
         start = 0
         found = False
+        pos = -1
         while True:
             pos = text_lower.find(disease_key, start)
             if pos == -1:
@@ -388,6 +389,11 @@ def _extract_diseases(text: str, dicts: EntityDictionaries) -> list[EntityMentio
             start = pos + 1
         if not found:
             continue
+
+        # Single-word disease keys require biomedical context nearby
+        if ' ' not in disease_key:
+            if not _has_biomedical_context(text, pos):
+                continue
 
         info = dicts.disease_names[disease_key]
         canonical = info.get('label', disease_key)
