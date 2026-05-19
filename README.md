@@ -97,7 +97,7 @@ The script detects mentions of other page names in body text and converts them t
 
 ### Code Block Detection
 
-Text in monospace fonts (Consolas, Courier, etc.) is automatically rendered as fenced code blocks. Single-cell tables containing shell commands or code are also detected and converted.
+Text in monospace fonts (Consolas, Courier, etc.) is automatically rendered as fenced code blocks. Single-cell tables containing shell commands or code are also detected and converted. Additionally, a rescue pass detects R/Python code that wasn't styled with monospace (common in pasted code) and wraps it in fenced blocks.
 
 ### Tags and Checkboxes
 
@@ -209,6 +209,31 @@ obsidian_export/
         report_a1b2c3d4_ai.md
         .vision_ai_cache.json
 ```
+
+## Post-Processing Tools
+
+### `tools/fix_export.py`
+
+Applies fixes to an existing export without re-running the full pipeline. Useful after pipeline updates to clean up previously exported files:
+
+```bash
+# Preview what would change
+python tools/fix_export.py --dry-run
+
+# Apply fixes to the default obsidian_export/ folder
+python tools/fix_export.py
+
+# Specify a different export directory
+python tools/fix_export.py /path/to/vault
+```
+
+Fixes applied:
+- Decodes leftover HTML entities (`&amp;`, `&lt;`, `&gt;`, `&quot;`)
+- Removes false disease wiki-links (common words incorrectly linked to rare diseases)
+- Converts OneNote citation format (`From <[URL]>`) to standard markdown
+- Detects and fences unescaped code blocks
+- Normalizes gene alias format in frontmatter and wikilinks
+- Removes duplicate entity index files (keeps canonical only)
 
 ## Caveats
 
