@@ -150,6 +150,16 @@ def file_hash(filepath: Path) -> str:
     return hashlib.sha256(filepath.read_bytes()).hexdigest()[:16]
 
 
+def file_hash_if_modified(filepath: Path, stored_hash: str, stored_mtime: float | None) -> str:
+    """Only compute hash if file mtime changed since last sync. Returns current hash."""
+    if not filepath.exists():
+        return ''
+    current_mtime = filepath.stat().st_mtime
+    if stored_mtime is not None and current_mtime == stored_mtime:
+        return stored_hash
+    return file_hash(filepath)
+
+
 # ============================================================================
 # PowerShell COM Export
 # ============================================================================
@@ -649,7 +659,45 @@ _CODE_RESCUE_RE = re.compile(
     r'|\bdef\s'
     r'|\bfunction\s*\('
     r'|\\#.*\\#'
+    # Shell/CLI commands
+    r'|^\s*\$\s*(git|conda|mamba|pip|ssh|scp|cd|ls|mkdir)\s'
+    r'|^\s*(git\s+(clone|pull|push|add|commit|config|checkout))'
+    r'|^\s*(conda|mamba)\s+(install|create|activate|env)'
+    r'|^\s*pip\s+install'
+    r'|^\s*ssh\s+'
+    # R-specific
+    r'|^\s*\w+::\w+\('
+    r'|\bggplot\('
+    r'|\bgeom_'
+    r'|\baes\('
+    r'|\bmutate\('
+    r'|\bfilter\('
+    r'|\bsummarise?\('
+    r'|\bselect\('
+    r'|\bgroup_by\('
+    r'|\barrange\(',
+    re.MULTILINE,
 )
+
+
+_CODE_LANG_R = re.compile(r'library\(|<-\s|%>%|ggplot\(|geom_|aes\(|dplyr::|tidyverse')
+_CODE_LANG_PYTHON = re.compile(r'^import\s|^from\s\w+\simport|def\s\w+\(|class\s\w+', re.MULTILINE)
+_CODE_LANG_BASH = re.compile(
+    r'^\s*(git|conda|mamba|pip|ssh|scp|cd|ls|mkdir|rm|cp|chmod|export|source|eval)\s',
+    re.MULTILINE,
+)
+
+
+def _detect_code_lang(lines: list[str]) -> str:
+    """Detect language from code buffer content."""
+    text = '\n'.join(lines)
+    if _CODE_LANG_R.search(text):
+        return 'r'
+    if _CODE_LANG_PYTHON.search(text):
+        return 'python'
+    if _CODE_LANG_BASH.search(text):
+        return 'bash'
+    return ''
 
 
 def _rescue_code_blocks(markdown: str) -> str:
@@ -663,7 +711,8 @@ def _rescue_code_blocks(markdown: str) -> str:
 
     def _flush_code(buf):
         if len(buf) >= 2:
-            result.append('```')
+            lang = _detect_code_lang(buf)
+            result.append(f'```{lang}')
             for ln in buf:
                 result.append(_unescape_code_line(ln))
             result.append('```')
@@ -709,6 +758,12 @@ def _looks_like_continuation(line: str) -> bool:
     if re.search(r'^\w[\w.]+\s*\(', stripped):
         return True
     if re.search(r'^\s{4,}', line):
+        return True
+    # Shell continuations: lines starting with common flags/args
+    if re.search(r'^\s*(-\w|--\w)', stripped):
+        return True
+    # Pipe chains, closing parens, R formula continuations
+    if stripped.startswith((')', ']', '}', '|', '+', '%>%', '||', '&&')):
         return True
     return False
 
@@ -1242,6 +1297,12 @@ def _split_frontmatter(markdown: str) -> tuple[str, str]:
 
 
 _MAX_WIKIFY_LENGTH = 200_000  # Skip wikification for pages over 200KB to prevent regex DoS
+_PROTECTED_PATTERN = re.compile(
+    r'```[\s\S]*?```'          # fenced code blocks
+    r'|`[^`\n]+`'             # inline code
+    r'|\[\[[^\[\]]+\]\]'      # wikilinks (no nested brackets)
+    r'|\[[^\]]*\]\([^)]*\)'   # markdown links
+)
 
 _GENERIC_PAGE_NAMES = {
     'research', 'other', 'general', 'todo', 'questions', 'summary',
@@ -1312,16 +1373,9 @@ def _auto_wikify(markdown: str, all_page_names: set[str], current_page_name: str
     sorted_texts = sorted(aliases.keys(), key=len, reverse=True)
 
     # Split body into protected and unprotected segments
-    protected_pattern = re.compile(
-        r'```[\s\S]*?```'          # fenced code blocks
-        r'|`[^`\n]+`'             # inline code
-        r'|\[\[[^\[\]]+\]\]'      # wikilinks (no nested brackets)
-        r'|\[[^\]]*\]\([^)]*\)'   # markdown links
-    )
-
     segments = []
     last_end = 0
-    for m in protected_pattern.finditer(body):
+    for m in _PROTECTED_PATTERN.finditer(body):
         if m.start() > last_end:
             segments.append((body[last_end:m.start()], False))
         segments.append((m.group(), True))
@@ -1500,16 +1554,9 @@ def _wikify_entities(markdown: str, entities_dict: dict,
         return markdown
 
     # Protect existing wikilinks, code blocks, inline code, markdown links
-    protected_pattern = re.compile(
-        r'```[\s\S]*?```'
-        r'|`[^`\n]+`'
-        r'|\[\[[^\[\]]+\]\]'
-        r'|\[[^\]]*\]\([^)]*\)'
-    )
-
     segments = []
     last_end = 0
-    for m in protected_pattern.finditer(body):
+    for m in _PROTECTED_PATTERN.finditer(body):
         if m.start() > last_end:
             segments.append((body[last_end:m.start()], False))
         segments.append((m.group(), True))
@@ -1578,7 +1625,8 @@ def determine_actions(state: dict, pages: list[dict], args) -> list[dict]:
                 actions.append({'type': 'reexport', 'page': page, 'key': key, 'entry': entry})
             continue
 
-        current_hash = file_hash(active_path)
+        current_hash = file_hash_if_modified(
+            active_path, entry.get('content_hash', ''), entry.get('file_mtime'))
         obsidian_changed = (current_hash != entry.get('content_hash', ''))
 
         if not obsidian_changed:
@@ -1774,6 +1822,9 @@ def _parse_embed_order(markdown: str) -> list[dict]:
     return embed_order
 
 
+_SKIP_PAGE_NAMES = {'Untitled', 'Untitled page', 'Neuer Abschnitt'}
+
+
 def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
                    page_id_map=None, all_page_names=None):
     """Export or update a page."""
@@ -1785,6 +1836,13 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
         return
 
     markdown, images = convert_page_xml(xml_path, page, args.skip_images, page_id_map)
+
+    # Skip empty pages with generic names (OneNote placeholders)
+    if page['name'] in _SKIP_PAGE_NAMES:
+        _, body = _split_frontmatter(markdown)
+        body_stripped = body.strip()
+        if not body_stripped or len(body_stripped) < 20:
+            return
 
     # AI semantic tags + entity extraction
     run_entities = not args.no_entities
@@ -1971,6 +2029,7 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
         'onenote_modified': page['modified'],
         'active_file': rel_path,
         'content_hash': file_hash(full_path),
+        'file_mtime': full_path.stat().st_mtime if full_path.exists() else None,
         'status': 'synced',
     }
 

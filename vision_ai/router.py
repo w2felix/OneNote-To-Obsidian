@@ -1,6 +1,7 @@
 """Route detected content types to the appropriate worker and orchestrate analysis."""
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from vision_ai.detector import PageContext, AttachmentGroup, detect_content_types
@@ -12,6 +13,8 @@ from vision_ai.output import (
 )
 
 logger = logging.getLogger(__name__)
+
+MAX_CONCURRENT_WORKERS = 5
 
 
 WORKER_REGISTRY = {
@@ -73,10 +76,25 @@ def analyze_page_attachments(page_md_path: Path, attachments_dir: Path,
     cache = load_cache(ai_notes_dir)
 
     callouts_to_inject = []
-    for group in groups:
-        result = _process_group(group, images, ctx, ai_notes_dir, cache, force)
-        if result:
-            callouts_to_inject.append(result)
+    if len(groups) >= 2:
+        with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_WORKERS, len(groups))) as pool:
+            futures = {
+                pool.submit(_process_group, group, images, ctx, ai_notes_dir, cache, force): group
+                for group in groups
+            }
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    if result:
+                        callouts_to_inject.append(result)
+                except Exception as e:
+                    group = futures[future]
+                    logger.warning(f"  Vision AI worker failed: {group.worker_type}: {e}")
+    else:
+        for group in groups:
+            result = _process_group(group, images, ctx, ai_notes_dir, cache, force)
+            if result:
+                callouts_to_inject.append(result)
 
     # Inject all callout links in a single file read/write pass
     if callouts_to_inject:
