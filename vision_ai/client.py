@@ -71,7 +71,8 @@ def get_client():
 
 
 def api_call_with_retry(messages: list, system: str = "", max_tokens: int = 4096,
-                        model: Optional[str] = None) -> str:
+                        model: Optional[str] = None,
+                        return_stop_reason: bool = False) -> "str | tuple[str, str]":
     client = get_client()
     model = model or VISION_MODEL
 
@@ -82,7 +83,10 @@ def api_call_with_retry(messages: list, system: str = "", max_tokens: int = 4096
     for attempt in range(RETRY_ATTEMPTS):
         try:
             response = client.messages.create(**kwargs)
-            return response.content[0].text
+            text = response.content[0].text
+            if return_stop_reason:
+                return text, response.stop_reason
+            return text
         except Exception as e:
             status = getattr(e, 'status_code', None)
             if status in RETRYABLE_STATUS_CODES and attempt < RETRY_ATTEMPTS - 1:
