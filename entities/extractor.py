@@ -48,6 +48,8 @@ FALSE_POSITIVE_GENES = {
     'CS', 'ET', 'AM', 'PM', 'SCT', 'S3',
     'DMPK', 'MPI', 'EMD', 'GLP', 'KO', 'PI', 'EMT', 'STAT', 'EST', 'HIPPO',
     'ILD', 'IC', 'API', 'RCC', 'CMS',
+    # Business/process abbreviations that collide with HGNC symbols
+    'CDA', 'DD', 'SAR', 'JP', 'EI', 'HRD',
     'ACE', 'BIN', 'ADD', 'BIG', 'BIT', 'BOX', 'BUS', 'CAR', 'CAT', 'COG',
     'COW', 'CRY', 'CUP', 'DAD', 'DAY', 'DIG', 'DIM', 'DOG', 'DOT', 'DRY',
     'DUG', 'EAR', 'EAT', 'EGG', 'ERA', 'EVE', 'EYE', 'FAD', 'FAT', 'FEW',
@@ -340,6 +342,8 @@ _FALSE_POSITIVE_DISEASES = {
     'scan', 'iris', 'mass', 'mild', 'dose', 'loss', 'gain',
     # Words often found in biomedical text but not diseases
     'stem', 'lead', 'risk', 'diet', 'test',
+    # Common adjectives/descriptors that match MONDO entries
+    'complete', 'not rare',
     # German words that collide with MONDO
     'dass', 'fallen', 'fast', 'still',
     # Common words matching rare disease synonyms

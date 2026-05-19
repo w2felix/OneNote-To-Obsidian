@@ -4,11 +4,58 @@ import hashlib
 import json
 import logging
 import re
+from pathlib import Path
 
 from vision_ai.client import api_call_with_retry, TAGGER_MODEL
 
 logger = logging.getLogger(__name__)
 MIN_WORD_COUNT = 50
+
+# Tag normalization vocabulary (loaded lazily)
+_tag_synonym_map: dict[str, str] | None = None
+
+
+def _load_tag_vocabulary() -> dict[str, str]:
+    """Load tag_vocabulary.yaml and build synonym → canonical mapping."""
+    global _tag_synonym_map
+    if _tag_synonym_map is not None:
+        return _tag_synonym_map
+
+    vocab_path = Path(__file__).resolve().parent.parent / 'entity_data' / 'tag_vocabulary.yaml'
+    _tag_synonym_map = {}
+    if not vocab_path.exists():
+        return _tag_synonym_map
+
+    try:
+        import yaml
+        with open(vocab_path, encoding='utf-8') as f:
+            vocab = yaml.safe_load(f) or {}
+        for canonical, synonyms in vocab.items():
+            _tag_synonym_map[canonical] = canonical
+            if isinstance(synonyms, list):
+                for syn in synonyms:
+                    _tag_synonym_map[syn] = canonical
+    except ImportError:
+        # Fallback: simple YAML parsing without pyyaml
+        current_key = None
+        for line in vocab_path.read_text(encoding='utf-8').splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#'):
+                continue
+            if not line.startswith(' ') and stripped.endswith(':'):
+                current_key = stripped.rstrip(':').strip()
+                _tag_synonym_map[current_key] = current_key
+            elif current_key and stripped.startswith('- '):
+                syn = stripped.removeprefix('- ').strip()
+                _tag_synonym_map[syn] = current_key
+
+    return _tag_synonym_map
+
+
+def _normalize_tag_vocabulary(tag: str) -> str:
+    """Map a tag to its canonical form using the vocabulary."""
+    vocab = _load_tag_vocabulary()
+    return vocab.get(tag, tag)
 
 SYSTEM_PROMPT = """You are a knowledge-base taxonomist. Given this note, return 3-7 topic tags.
 Rules:
@@ -110,8 +157,11 @@ Content:
                 slug = tag.lower().strip().replace(' ', '-')
                 slug = re.sub(r'[^a-z0-9_/\-]', '', slug)
                 slug = slug[:80]  # limit tag length for Obsidian compatibility
-                if slug and slug not in normalized:
-                    normalized.append(slug)
+                if slug:
+                    # Map to canonical form via vocabulary
+                    slug = _normalize_tag_vocabulary(slug)
+                    if slug not in normalized:
+                        normalized.append(slug)
 
         # Deduplicate against existing tags
         existing_set = set(existing_tags)
