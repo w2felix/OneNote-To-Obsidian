@@ -48,13 +48,31 @@ TESSERACT_FILENAME = 'tesseract-ocr-w64-setup-5.5.0.20241111.exe'
 # Set to None to skip verification (upstream doesn't publish checksums)
 TESSERACT_SHA256 = None
 
-TESSERACT_SEARCH_PATHS = [
-    Path(os.environ.get('LOCALAPPDATA', '')) / 'Programs' / 'Tesseract-OCR',
-    Path(os.environ.get('CONDA_PREFIX', '')) / 'Library' / 'bin',
-    Path(r'C:\Program Files\Tesseract-OCR'),
-    Path(r'C:\Program Files (x86)\Tesseract-OCR'),
-    Path.home() / 'AppData' / 'Local' / 'Programs' / 'Tesseract-OCR',
-]
+def _tesseract_search_paths() -> list[Path]:
+    """Build search paths, skipping any based on unset env vars."""
+    paths = []
+    localappdata = os.environ.get('LOCALAPPDATA')
+    if localappdata:
+        paths.append(Path(localappdata) / 'Programs' / 'Tesseract-OCR')
+        paths.append(Path(localappdata) / 'Programs' / 'tesseract')
+    conda_prefix = os.environ.get('CONDA_PREFIX')
+    if conda_prefix:
+        paths.append(Path(conda_prefix) / 'Library' / 'bin')
+    paths += [
+        Path(r'C:\Program Files\Tesseract-OCR'),
+        Path(r'C:\Program Files (x86)\Tesseract-OCR'),
+        Path.home() / 'AppData' / 'Local' / 'Programs' / 'Tesseract-OCR',
+        Path.home() / 'AppData' / 'Local' / 'Programs' / 'tesseract',
+    ]
+    return paths
+
+
+TESSERACT_SEARCH_PATHS = _tesseract_search_paths()
+
+# eng.traineddata download (fast variant, ~4 MB)
+ENG_TRAINEDDATA_URL = (
+    'https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata'
+)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -107,10 +125,29 @@ def conda_executable() -> str | None:
 
 # ── Package Installation ─────────────────────────────────────────────────────
 
+def ensure_pip():
+    """Ensure pip is available in the current environment."""
+    result = subprocess.run(
+        [sys.executable, '-m', 'pip', '--version'], capture_output=True, text=True)
+    if result.returncode == 0:
+        return True
+    print('  pip not found — attempting to bootstrap...')
+    result = subprocess.run(
+        [sys.executable, '-m', 'ensurepip', '--default-pip'], capture_output=True, text=True)
+    if result.returncode == 0:
+        print('  pip bootstrapped successfully.')
+        return True
+    print('  [!] Could not install pip. Install it manually:', file=sys.stderr)
+    print('      python -m ensurepip --default-pip', file=sys.stderr)
+    return False
+
+
 def install_pip_packages():
     section('Installing pip packages')
     if not REQUIREMENTS_TXT.exists():
         print(f'  ERROR: {REQUIREMENTS_TXT} not found', file=sys.stderr)
+        return
+    if not ensure_pip():
         return
     ok = run(
         [sys.executable, '-m', 'pip', 'install', '--upgrade', '-r', str(REQUIREMENTS_TXT)],
@@ -129,12 +166,8 @@ def install_conda_packages(conda: str):
 
 
 def warn_no_conda():
-    print('\n  [!] Not running inside a conda environment.')
-    print('      pandas, openpyxl, and pytesseract will be installed via pip.')
-    run(
-        [sys.executable, '-m', 'pip', 'install'] + CONDA_PACKAGES,
-        'pip install ' + ' '.join(CONDA_PACKAGES),
-    )
+    print('\n  [i] Not running inside a conda environment.')
+    print('      All packages will be installed via pip (from requirements.txt).')
 
 
 # ── Tesseract Detection & Installation ──────────────────────────────────────
@@ -311,6 +344,25 @@ def find_tessdata(tesseract_dir: Path) -> Path | None:
     return None
 
 
+def download_eng_traineddata(tessdata_dir: Path) -> bool:
+    """Download eng.traineddata into the tessdata directory."""
+    dest = tessdata_dir / 'eng.traineddata'
+    print(f'  Downloading eng.traineddata (~4 MB)...')
+    try:
+        def progress(block_count, block_size, total_size):
+            if total_size > 0:
+                pct = min(100, block_count * block_size * 100 // total_size)
+                print(f'\r    {pct}%', end='', flush=True)
+        urllib.request.urlretrieve(ENG_TRAINEDDATA_URL, dest, reporthook=progress)
+        print(f'\r  Downloaded eng.traineddata to {tessdata_dir}')
+        return True
+    except Exception as e:
+        print(f'\n  [!] Failed to download eng.traineddata: {e}')
+        print(f'      Download manually from: {ENG_TRAINEDDATA_URL}')
+        print(f'      Place in: {tessdata_dir}')
+        return False
+
+
 def configure_tesseract_path(tesseract_dir: Path):
     """Configure PATH and TESSDATA_PREFIX for Tesseract."""
     tesseract_dir = Path(tesseract_dir)
@@ -328,12 +380,16 @@ def configure_tesseract_path(tesseract_dir: Path):
         os.environ['TESSDATA_PREFIX'] = str(tessdata)
         print(f'  Set TESSDATA_PREFIX = {tessdata}')
         if not (tessdata / 'eng.traineddata').exists():
-            print(f'  [!] Warning: eng.traineddata not found in {tessdata}')
-            print(f'      OCR will fail until English language data is installed.')
+            download_eng_traineddata(tessdata)
     else:
-        print(f'  [!] Warning: tessdata directory not found near {dir_str}')
-        print(f'      Searched: <dir>/tessdata, <dir>/../tessdata, <dir>/../share/tessdata')
-        print(f'      Set TESSDATA_PREFIX manually to your tessdata folder.')
+        # tessdata directory doesn't exist at all — create it and download
+        tessdata = tesseract_dir / 'tessdata'
+        tessdata.mkdir(exist_ok=True)
+        set_user_env_var('TESSDATA_PREFIX', str(tessdata))
+        os.environ['TESSDATA_PREFIX'] = str(tessdata)
+        print(f'  Created {tessdata}')
+        print(f'  Set TESSDATA_PREFIX = {tessdata}')
+        download_eng_traineddata(tessdata)
 
     # Also set for current process
     os.environ['PATH'] = dir_str + ';' + os.environ.get('PATH', '')
@@ -352,14 +408,6 @@ def configure_tesseract_path(tesseract_dir: Path):
             print(f'  [!] Could not verify Tesseract. Check the installation.')
     except (FileNotFoundError, OSError):
         print(f'  [!] Could not run tesseract.exe at {tesseract_dir}. Check the installation.')
-
-
-def setup_tesseract_conda(conda: str):
-    """Install Tesseract via conda."""
-    run(
-        [conda, 'install', '-c', 'conda-forge', '--yes', 'tesseract'],
-        'conda install tesseract',
-    )
 
 
 # ── Ontology Downloads ───────────────────────────────────────────────────────
@@ -392,8 +440,29 @@ def download_file(filename: str, url: str, size_hint: str, force: bool):
             print(f'\r    {pct}%', end='', flush=True)
 
     try:
-        urllib.request.urlretrieve(url, dest, reporthook=progress)
-        print(f'\r  Downloaded {filename} ({dest.stat().st_size // (1024 * 1024):.0f} MB)')
+        _, headers = urllib.request.urlretrieve(url, dest, reporthook=progress)
+        actual_size = dest.stat().st_size
+        # Verify download wasn't truncated (check Content-Length if server provided it)
+        expected_size = headers.get('Content-Length')
+        if expected_size and int(expected_size) > actual_size:
+            print(f'\n  ERROR: {filename} download truncated '
+                  f'({actual_size // (1024*1024)} MB of {int(expected_size) // (1024*1024)} MB)',
+                  file=sys.stderr)
+            dest.unlink()
+            sys.exit(1)
+        # Sanity check: JSON files should be parseable
+        if filename.endswith('.json') and actual_size > 0:
+            import json as _json
+            try:
+                with open(dest, encoding='utf-8') as f:
+                    _json.load(f)
+            except _json.JSONDecodeError as je:
+                print(f'\n  ERROR: {filename} is not valid JSON (likely truncated download)',
+                      file=sys.stderr)
+                print(f'      {je}', file=sys.stderr)
+                dest.unlink()
+                sys.exit(1)
+        print(f'\r  Downloaded {filename} ({actual_size // (1024 * 1024):.0f} MB)')
     except Exception as e:
         print(f'\n  ERROR downloading {filename}: {e}', file=sys.stderr)
         if dest.exists():
@@ -509,17 +578,17 @@ def main():
         conda = conda_executable()
         if conda:
             install_conda_packages(conda)
-            # Tesseract via conda
-            setup_tesseract_conda(conda)
         else:
             warn_no_conda()
-            # Try to find or set up Tesseract
-            tess_path = find_tesseract()
-            if tess_path:
-                print(f'\n  Tesseract found at: {tess_path}')
-                configure_tesseract_path(tess_path)
-            else:
-                print('\n  [!] Tesseract not found. Run later: python setup.py --setup-tesseract')
+
+        # Tesseract setup (same for conda and non-conda — conda tesseract
+        # package doesn't provide the Windows OCR binary reliably)
+        tess_path = find_tesseract()
+        if tess_path:
+            print(f'\n  Tesseract found at: {tess_path}')
+            configure_tesseract_path(tess_path)
+        else:
+            print('\n  [!] Tesseract not found. Run later: python setup.py --setup-tesseract')
 
     setup_entities(force=args.update_entities)
     verify()

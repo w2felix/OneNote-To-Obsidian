@@ -194,10 +194,32 @@ def _validate_page_id(page_id: str) -> str:
     return page_id
 
 
-def generate_export_script(temp_dir: Path, page_ids: list[str] | None = None) -> str:
-    """Generate a PowerShell script that exports hierarchy and page content."""
+def generate_export_script(temp_dir: Path, page_ids: list[str] | None = None,
+                           publish_ink: bool = False) -> str:
+    """Generate a PowerShell script that exports hierarchy and page content.
+
+    If publish_ink is True, pages containing ink are also published as PDF
+    for Vision AI transcription (within the same COM session).
+    """
     # Use single-quoted string in PowerShell (no variable/subexpression expansion)
     temp_dir_ps = str(temp_dir).replace("'", "''")
+
+    # Ink detection and optional PDF publish within the same COM session
+    if publish_ink:
+        ink_block = '''
+        if ($pageXml -match "InkDrawing|InkParagraph") {
+            try {
+                $onenote.Publish($currentPageId, "$exportDir\\$hash`_ink.pdf", 3, "")
+                Write-Output "INK:$hash"
+            } catch {
+                Write-Output "INK_ERROR:$hash`:$($_.Exception.Message)"
+            }
+        }'''
+    else:
+        ink_block = '''
+        if ($pageXml -match "InkDrawing|InkParagraph") {
+            Write-Output "INK:$hash"
+        }'''
 
     if page_ids:
         validated_ids = [_validate_page_id(pid) for pid in page_ids]
@@ -209,6 +231,7 @@ $pageIds = @(
 $count = 0
 foreach ($pageId in $pageIds) {{
     $count++
+    $currentPageId = $pageId
     try {{
         [string]$pageXml = ""
         $onenote.GetPageContent($pageId, [ref]$pageXml, 1)
@@ -219,22 +242,23 @@ foreach ($pageId in $pageIds) {{
         ).Replace("-","").Substring(0,16).ToLower()
         $filename = "$exportDir\\$hash.xml"
         [System.IO.File]::WriteAllText($filename, $pageXml, [System.Text.Encoding]::UTF8)
-        Write-Output "PROGRESS:$count/$($pageIds.Count)"
+        Write-Output "PROGRESS:$count/$($pageIds.Count)"{ink_block}
     }} catch {{
         Write-Output "ERROR:$pageId`:$($_.Exception.Message)"
     }}
 }}
 '''
     else:
-        page_export_block = '''
+        page_export_block = f'''
 [xml]$doc = $hierarchy
 $nsm = New-Object System.Xml.XmlNamespaceManager($doc.NameTable)
 $nsm.AddNamespace("one", "http://schemas.microsoft.com/office/onenote/2013/onenote")
 $pages = $doc.SelectNodes("//one:Page", $nsm)
 $count = 0
-foreach ($page in $pages) {
+foreach ($page in $pages) {{
     $count++
-    try {
+    $currentPageId = $page.ID
+    try {{
         [string]$pageXml = ""
         $onenote.GetPageContent($page.ID, [ref]$pageXml, 1)
         $hash = [System.BitConverter]::ToString(
@@ -244,11 +268,11 @@ foreach ($page in $pages) {
         ).Replace("-","").Substring(0,16).ToLower()
         $filename = "$exportDir\\$hash.xml"
         [System.IO.File]::WriteAllText($filename, $pageXml, [System.Text.Encoding]::UTF8)
-        Write-Output "PROGRESS:$count/$($pages.Count):$($page.name)"
-    } catch {
+        Write-Output "PROGRESS:$count/$($pages.Count):$($page.name)"{ink_block}
+    }} catch {{
         Write-Output "ERROR:$($page.ID):$($_.Exception.Message)"
-    }
-}
+    }}
+}}
 '''
 
     return f'''[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -284,9 +308,10 @@ def _sanitize_error_output(text: str) -> str:
     return text
 
 
-def run_powershell_export(temp_dir: Path, page_ids: list[str] | None = None) -> list[str]:
-    """Run PowerShell export script, return list of errors."""
-    script = generate_export_script(temp_dir, page_ids)
+def run_powershell_export(temp_dir: Path, page_ids: list[str] | None = None,
+                          publish_ink: bool = False) -> tuple[list[str], int]:
+    """Run PowerShell export script, return (errors, ink_page_count)."""
+    script = generate_export_script(temp_dir, page_ids, publish_ink=publish_ink)
     script_path = temp_dir / 'export.ps1'
     script_path.write_text(script, encoding='utf-8')
 
@@ -297,12 +322,17 @@ def run_powershell_export(temp_dir: Path, page_ids: list[str] | None = None) -> 
     )
 
     errors = []
+    ink_count = 0
     for line in process.stdout:
         line = line.strip()
         if line.startswith('PROGRESS:'):
             parts = line[9:].split(':', 1)
             name = parts[1] if len(parts) > 1 else ''
             safe_print(f'\r  Exporting pages {parts[0]} {name[:50]:<50}', end='', flush=True)
+        elif line.startswith('INK:'):
+            ink_count += 1
+        elif line.startswith('INK_ERROR:'):
+            safe_print(f'\n  [!] Ink PDF publish failed: {line[10:]}', file=sys.stderr)
         elif line.startswith('ERROR:'):
             errors.append(line[6:])
         elif line == 'HIERARCHY_DONE':
@@ -316,7 +346,8 @@ def run_powershell_export(temp_dir: Path, page_ids: list[str] | None = None) -> 
         stderr_safe = _sanitize_error_output(stderr)
         safe_print(f'  PowerShell warnings: {stderr_safe[:200]}', file=sys.stderr)
 
-    return errors
+    return errors, ink_count
+
 
 
 # ============================================================================
@@ -514,8 +545,8 @@ _MONOSPACE_FONTS = frozenset({
 
 
 def convert_page_xml(xml_path: Path, page_info: dict, skip_images: bool = False,
-                     page_id_map: dict | None = None) -> tuple[str, dict]:
-    """Convert OneNote page XML to Markdown string + dict of images."""
+                     page_id_map: dict | None = None) -> tuple[str, dict, bool]:
+    """Convert OneNote page XML to Markdown string + dict of images + has_ink flag."""
     global _current_page_id_map, _current_checkbox_tag_indices, _current_monospace_styles
     _current_page_id_map = page_id_map
     try:
@@ -526,7 +557,21 @@ def convert_page_xml(xml_path: Path, page_info: dict, skip_images: bool = False,
         _current_monospace_styles = set()
 
 
-def _convert_page_xml_inner(xml_path: Path, page_info: dict, skip_images: bool) -> tuple[str, dict]:
+def _extract_ink_recognized_text(ink_paragraphs, ns) -> str:
+    """Extract recognizedText from InkWord elements as plain text."""
+    paragraphs = []
+    for ink_para in ink_paragraphs:
+        words = []
+        for ink_word in ink_para.findall('one:InkWord', ns):
+            recognized = ink_word.get('recognizedText', '')
+            if recognized:
+                words.append(recognized)
+        if words:
+            paragraphs.append(' '.join(words))
+    return '\n\n'.join(paragraphs)
+
+
+def _convert_page_xml_inner(xml_path: Path, page_info: dict, skip_images: bool) -> tuple[str, dict, bool]:
     """Inner conversion logic for convert_page_xml."""
     tree = ET.parse(xml_path)
     root = tree.getroot()
@@ -636,6 +681,24 @@ def _convert_page_xml_inner(xml_path: Path, page_info: dict, skip_images: bool) 
                     lines.append(line)
             lines.append('')
 
+    # Detect and extract handwritten ink content
+    ink_paragraphs = root.findall('one:InkParagraph', ns)
+    ink_drawings = root.findall('one:InkDrawing', ns)
+    has_ink = bool(ink_paragraphs or ink_drawings)
+
+    if has_ink:
+        ink_text = _extract_ink_recognized_text(ink_paragraphs, ns) if ink_paragraphs else ''
+        lines.append('')
+        lines.append('---')
+        lines.append('')
+        lines.append('## Handwritten Notes')
+        lines.append('')
+        if ink_text:
+            lines.append(ink_text)
+        else:
+            lines.append('*(Handwritten content — use `--vision-ai` to transcribe)*')
+        lines.append('')
+
     markdown = '\n'.join(lines)
     markdown = re.sub(r'\n{3,}', '\n\n', markdown)
     markdown = _HASH_SEP_RE.sub('---', markdown)
@@ -647,7 +710,7 @@ def _convert_page_xml_inner(xml_path: Path, page_info: dict, skip_images: bool) 
     )
     # Rescue undetected code: consecutive escaped lines that look like R/Python code
     markdown = _rescue_code_blocks(markdown)
-    return markdown, images
+    return markdown, images, has_ink
 
 
 _CODE_RESCUE_RE = re.compile(
@@ -1707,11 +1770,18 @@ def execute_actions(actions: list[dict], state: dict, args, temp_dir: Path,
     if pages_to_export:
         print(f'\n  Fetching {len(pages_to_export)} page(s) from OneNote...')
         page_ids = [p['id'] for p in pages_to_export]
-        errors = run_powershell_export(temp_dir, page_ids)
+        publish_ink = args.vision_ai and not args.dry_run
+        errors, ink_count = run_powershell_export(temp_dir, page_ids, publish_ink=publish_ink)
         if errors:
             print(f'  Warnings: {len(errors)} page(s) had export errors.')
             for err in errors[:5]:
                 print(f'    {err[:100]}')
+        if ink_count:
+            if publish_ink:
+                safe_print(f'  Published {ink_count} ink page(s) as PDF for transcription.')
+            else:
+                safe_print(f'  Found {ink_count} page(s) with handwritten ink.'
+                           ' Re-run with --vision-ai to transcribe.')
 
     # Process each action
     for i, action in enumerate(actions):
@@ -1824,6 +1894,58 @@ def _parse_embed_order(markdown: str) -> list[dict]:
 
 _SKIP_PAGE_NAMES = {'Untitled', 'Untitled page', 'Neuer Abschnitt'}
 
+_INK_SECTION_HEADER = '## Handwritten Notes'
+
+
+def _transcribe_ink_via_vision(pdf_path: Path, page_name: str, section_path: str) -> str | None:
+    """Use Claude Vision to transcribe handwritten content from a rendered page PDF."""
+    from vision_ai.vision_utils import pdf_to_images, encode_image, build_vision_message
+    from vision_ai.client import api_call_with_retry, VISION_MODEL
+
+    pdf_bytes = pdf_path.read_bytes()
+    try:
+        pil_images = pdf_to_images(pdf_bytes, dpi=200, max_pages=3)
+    except Exception as e:
+        safe_print(f'\n  [!] Ink PDF rendering failed for {page_name}: {e}', file=sys.stderr)
+        return None
+    if not pil_images:
+        return None
+
+    encoded = [encode_image(img, max_dim=2048) for img in pil_images]
+
+    prompt = (
+        f"Page: {page_name}\nSection: {section_path}\n\n"
+        "This is a rendered OneNote page containing handwritten text. "
+        "Transcribe ALL handwritten text you can see, preserving paragraph structure. "
+        "For scientific terms, gene names, protein names, chemical formulas, or "
+        "abbreviations, be precise. Output the transcribed text as clean markdown. "
+        "Do not add commentary or preamble. "
+        "If there is typed text mixed with handwriting, only transcribe the "
+        "handwritten portions."
+    )
+
+    messages = build_vision_message(encoded, prompt)
+    try:
+        response = api_call_with_retry(messages, max_tokens=4096, model=VISION_MODEL)
+        return response.strip() if response else None
+    except Exception as e:
+        safe_print(f'\n  [!] Ink vision transcription failed for {page_name}: {e}', file=sys.stderr)
+        return None
+
+
+def _replace_ink_section(markdown: str, vision_text: str) -> str:
+    """Replace the fallback recognizedText section with Vision AI transcription."""
+    idx = markdown.find(_INK_SECTION_HEADER)
+    if idx == -1:
+        return markdown.rstrip() + '\n\n---\n\n' + _INK_SECTION_HEADER + '\n\n' + vision_text + '\n'
+
+    # Find the content separator before the ink header (skip past YAML frontmatter close)
+    yaml_close = markdown.find('\n---', 3)
+    content_sep = markdown.rfind('\n---\n', yaml_close + 1, idx)
+    cut = content_sep + 1 if content_sep != -1 else idx
+
+    return markdown[:cut] + '---\n\n' + _INK_SECTION_HEADER + '\n\n' + vision_text + '\n'
+
 
 def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
                    page_id_map=None, all_page_names=None):
@@ -1835,7 +1957,7 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
     if not xml_path.exists():
         return
 
-    markdown, images = convert_page_xml(xml_path, page, args.skip_images, page_id_map)
+    markdown, images, has_ink = convert_page_xml(xml_path, page, args.skip_images, page_id_map)
 
     # Skip empty pages with generic names (OneNote placeholders)
     if page['name'] in _SKIP_PAGE_NAMES:
@@ -1970,6 +2092,31 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
         except Exception as e:
             print(f'\n  [!] Entity extraction/tagging failed for {page["name"]}: {e}')
 
+    # Ink Vision AI transcription (replaces OneNote recognizedText with better result)
+    if has_ink and args.vision_ai and not args.dry_run:
+        ink_pdf_path = temp_dir / f'{page_key(page["id"])}_ink.pdf'
+        if ink_pdf_path.exists():
+            if 'ink_vision' not in state:
+                state['ink_vision'] = {}
+            ink_pdf_hash = file_hash(ink_pdf_path)
+            cached_ink = state['ink_vision'].get(key)
+
+            if cached_ink and not args.vision_ai_force and cached_ink.get('hash') == ink_pdf_hash:
+                ink_vision_text = cached_ink.get('text') or None
+            else:
+                ink_vision_text = _transcribe_ink_via_vision(
+                    ink_pdf_path, page['name'], page.get('section_path', ''))
+                state['ink_vision'][key] = {
+                    'hash': ink_pdf_hash,
+                    'text': ink_vision_text or '',
+                }
+
+            if ink_vision_text:
+                markdown = _replace_ink_section(markdown, ink_vision_text)
+        else:
+            safe_print(f'\n  [!] Ink PDF not found for "{page["name"]}" — transcription skipped.',
+                       file=sys.stderr)
+
     # Auto-wikilinks
     if all_page_names:
         markdown = _auto_wikify(markdown, all_page_names, page['name'])
@@ -2045,7 +2192,7 @@ def _handle_conflict(action, state, args, temp_dir, full_path, out_dir, rel_path
     if not xml_path.exists():
         return
 
-    markdown, images = convert_page_xml(xml_path, page, args.skip_images, page_id_map)
+    markdown, images, _has_ink = convert_page_xml(xml_path, page, args.skip_images, page_id_map)
 
     # Auto-wikilinks on conflict file too
     if all_page_names:
@@ -2169,7 +2316,7 @@ def main():
 
         if is_first_run and not args.dry_run:
             # Full export: get hierarchy + all pages in one go
-            errors = run_powershell_export(temp_dir, page_ids=None)
+            errors, _ = run_powershell_export(temp_dir, page_ids=None)
         else:
             # Incremental or dry-run: only get hierarchy first
             temp_dir_ps = str(temp_dir).replace("'", "''")

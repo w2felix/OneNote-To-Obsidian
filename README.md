@@ -132,10 +132,23 @@ Analyzes embedded attachments using Claude and writes linked summaries to `_ai_n
 | Documents (PDF, DOCX) | Summary, key sections |
 | Presentations (PPTX) | Slide-by-slide extraction |
 | Tabular data (XLSX, CSV) | Schema + AI interpretation |
+| **Handwritten ink** | **Full text transcription inline in page** |
 
 Results are cached by content hash — unchanged files are never re-analyzed.
 
 AI notes include `cssclasses: [ai-generated]` and `graph_exclude: true` in their frontmatter. To hide them from the Obsidian graph: Settings > Files & Links > Excluded files > add `_ai_notes/`.
+
+### Handwriting Recognition (`--vision-ai`)
+
+Pages containing handwritten ink (stylus/pen input) are automatically detected during export. When `--vision-ai` is active:
+
+1. The page is rendered as PDF via OneNote's COM `Publish` method (same COM session as the export — no extra startup cost)
+2. The PDF is sent to Claude Vision (Sonnet) for transcription
+3. The transcribed text is inserted inline under a `## Handwritten Notes` section
+
+This handles scientific terms, gene names, abbreviations, and multilingual handwriting. Results are cached — re-runs don't re-call the API unless `--vision-ai-force` is used.
+
+Without `--vision-ai`, ink pages are still detected and a placeholder is shown. If OneNote has built-in recognition data (`InkWord` elements), that text is used as a free fallback.
 
 ### AI Tags (`--ai-tags`)
 
@@ -242,6 +255,7 @@ AI features use Claude models optimized for each task type:
 | Task | Model | Trigger | Input/call | Output/call |
 |------|-------|---------|------------|-------------|
 | Image analysis | Sonnet 4.6 | `--vision-ai` | ~2K–25K tokens (depends on image count) | ~500–2K tokens |
+| Ink transcription | Sonnet 4.6 | `--vision-ai` + ink page | ~2K–8K tokens (rendered page image) | ~500–2K tokens |
 | Tagging | Haiku 4.5 | `--ai-tags` | ~1.1K tokens (3KB body + prompt) | ~100 tokens |
 | Entity extraction (LLM) | Haiku 4.5 | `--ai-tags` | ~1.1K tokens (piggybacked) | ~200 tokens |
 | Tabular data | Sonnet 4.6 | `--vision-ai` + XLSX/CSV | ~800 tokens (schema) | ~300 tokens |
@@ -265,6 +279,7 @@ AI features use Claude models optimized for each task type:
 - **OneNote desktop app must be installed.** The script talks to OneNote via COM automation.
 - **First run is slow** (~30–60s for ~800 pages). Incremental syncs are fast (~10s).
 - **One-way sync.** Changes in Obsidian are never pushed back to OneNote.
+- **Handwritten pages** require `--vision-ai` for transcription. Without it, ink is detected but only a placeholder is written.
 - **Page moves** in OneNote appear as a new page + orphan.
 - **Sub-pages** are exported flat with `parent`/`children` links in frontmatter.
 - **Vision AI has costs.** See cost breakdown above. Use `--notebooks` to scope runs.

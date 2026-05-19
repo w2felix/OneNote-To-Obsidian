@@ -11,6 +11,44 @@ from vision_ai.client import api_call_with_retry, TAGGER_MODEL
 logger = logging.getLogger(__name__)
 MIN_WORD_COUNT = 50
 
+
+def _extract_json_value(text: str) -> str:
+    """Extract the first complete JSON value (object or array) from text.
+
+    Handles the case where the LLM appends commentary after the JSON.
+    """
+    if not text:
+        return text
+    open_ch = text[0]
+    if open_ch == '{':
+        close_ch = '}'
+    elif open_ch == '[':
+        close_ch = ']'
+    else:
+        return text
+    depth = 0
+    in_string = False
+    escape = False
+    for i, ch in enumerate(text):
+        if escape:
+            escape = False
+            continue
+        if ch == '\\' and in_string:
+            escape = True
+            continue
+        if ch == '"' and not escape:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == open_ch:
+            depth += 1
+        elif ch == close_ch:
+            depth -= 1
+            if depth == 0:
+                return text[:i + 1]
+    return text
+
 # Tag normalization vocabulary (loaded lazily)
 _tag_synonym_map: dict[str, str] | None = None
 
@@ -141,8 +179,11 @@ Content:
         cleaned = response.strip()
         if cleaned.startswith('```'):
             cleaned = re.sub(r'^```\w*\n?', '', cleaned)
-            cleaned = re.sub(r'\n?```$', '', cleaned)
+            cleaned = re.sub(r'\n?```\s*$', '', cleaned)
             cleaned = cleaned.strip()
+
+        # Strip trailing text after the JSON array closes
+        cleaned = _extract_json_value(cleaned)
 
         tags = json.loads(cleaned)
 

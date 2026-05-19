@@ -4,7 +4,11 @@ Step-by-step installation for OneNote to Obsidian Sync.
 
 ---
 
-## Step 1: Install Miniconda
+## Step 1: Python Environment
+
+You need Python 3.11+. Choose **one** of the following:
+
+### Option A: Conda (recommended)
 
 > Miniconda can be installed without admin rights — select "Just Me" during installation.
 
@@ -13,39 +17,44 @@ Step-by-step installation for OneNote to Obsidian Sync.
    - Install for: **Just Me**
    - Location: default (`C:\Users\YourName\miniconda3`)
    - Add to PATH: check the box (optional but convenient)
-
-Verify:
-
-```bash
-conda --version
-# Should output: conda 23.x.x or newer
-conda init powershell   # or: conda init bash
-# then restart the terminal
-```
-
----
-
-## Step 2: Create Environment
+3. Create and activate:
 
 ```bash
 conda create -n ds_env python=3.11 -y
 conda activate ds_env
-python --version
-# Should output: Python 3.11.x
 ```
+
+### Option B: Plain Python (no conda)
+
+If you already have Python 3.11+ installed:
+
+```bash
+python --version
+# Should output: Python 3.11.x or newer
+```
+
+The setup script works without conda — all packages install via pip.
 
 ---
 
-## Step 3: Run Setup Script
+## Step 2: Run Setup Script
 
-The setup script installs all packages, Tesseract OCR, and builds entity dictionaries:
+The setup script installs all packages, configures Tesseract OCR, and builds entity dictionaries:
 
 ```bash
+# If using conda:
 conda activate ds_env
+
 python setup.py
 ```
 
-This takes a few minutes (downloads ~115 MB of ontology data). It prints a verification summary when done.
+What it does:
+- Installs pip packages from `requirements.txt`
+- If conda is active: also installs pandas/openpyxl/pytesseract via conda
+- Finds Tesseract OCR and downloads `eng.traineddata` if missing
+- Downloads ontology files (~115 MB) and builds entity dictionaries
+
+It prints a verification summary when done.
 
 **Other options:**
 
@@ -62,7 +71,7 @@ python setup.py --setup-tesseract
 
 ---
 
-## Step 4: Configure API Credentials
+## Step 3: Configure API Credentials
 
 Required only for `--vision-ai` and `--ai-tags`.
 
@@ -83,7 +92,7 @@ Restart your terminal after setting variables.
 
 ---
 
-## Step 5: OneNote
+## Step 4: OneNote
 
 The script uses COM automation — no browser login or admin rights needed.
 
@@ -93,10 +102,12 @@ The script uses COM automation — no browser login or admin rights needed.
 
 ---
 
-## Step 6: First Run
+## Step 5: First Run
 
 ```bash
+# If using conda:
 conda activate ds_env
+
 python onenote_to_obsidian.py
 
 # With AI features (requires API credentials)
@@ -111,20 +122,16 @@ See the [README](README.md) for all CLI options.
 
 Tesseract is optional — it enables text extraction from screenshots. Without it, screenshot analysis still runs but can't read text in images.
 
-### Option A: Automatic (conda)
+`setup.py` automatically:
+- Detects Tesseract at common install paths (including `Tesseract-OCR` and `tesseract` variants)
+- Downloads `eng.traineddata` (~4 MB) if the language data is missing
+- Configures PATH and TESSDATA_PREFIX in your User environment
 
-If you're using conda, setup.py installs Tesseract automatically:
+### Option A: Automatic detection
 
-```bash
-conda activate ds_env
-python setup.py
-```
+If Tesseract is already installed, `python setup.py` finds and configures it automatically. No extra steps needed.
 
-### Option B: Manual download (no admin rights)
-
-Use this if you don't have conda or if the conda install didn't work.
-
-**Step 1 — Download:**
+### Option B: Download and install (no admin rights)
 
 ```bash
 python setup.py --setup-tesseract
@@ -132,17 +139,13 @@ python setup.py --setup-tesseract
 
 This downloads the installer to your temp folder and walks you through the setup.
 
-**Step 2 — Install for current user:**
-
 When the installer opens:
 - Select **"Install for current user only"**
 - Set install location to: `%LOCALAPPDATA%\Programs\Tesseract-OCR`
   (typically `C:\Users\YourName\AppData\Local\Programs\Tesseract-OCR`)
 - Complete the installation
 
-**Step 3 — Verify:**
-
-The setup script automatically adds Tesseract to your User PATH. Restart your terminal, then:
+The setup script auto-downloads `eng.traineddata` and configures PATH. Restart your terminal, then:
 
 ```bash
 tesseract --version
@@ -162,14 +165,14 @@ If you can't run the installer at all:
    ```bash
    python setup.py --tesseract-path "%LOCALAPPDATA%\Programs\Tesseract-OCR"
    ```
-   This configures PATH and TESSDATA_PREFIX automatically.
+   This configures PATH, TESSDATA_PREFIX, and downloads `eng.traineddata` automatically.
 
 ### Option D: Point to existing installation
 
 If Tesseract is already installed somewhere:
 
 ```bash
-python setup.py --tesseract-path "C:\path\to\Tesseract-OCR"
+python setup.py --tesseract-path "C:\path\to\tesseract"
 ```
 
 ---
@@ -183,10 +186,17 @@ python setup.py --tesseract-path "C:\path\to\Tesseract-OCR"
 python setup.py --setup-tesseract
 
 # Or point to an existing installation
-python setup.py --tesseract-path "C:\path\to\Tesseract-OCR"
+python setup.py --tesseract-path "C:\path\to\tesseract"
 ```
 
 If the PATH was set but the terminal doesn't find it: **restart your terminal** (PATH changes require a new shell session).
+
+### eng.traineddata not found
+
+This is handled automatically now — `setup.py` downloads it from GitHub. If it still fails (e.g. network issues), download manually:
+
+1. Get `eng.traineddata` from https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata
+2. Place it in your Tesseract `tessdata/` folder (e.g. `C:\...\Tesseract-OCR\tessdata\`)
 
 ### API credentials not working
 
@@ -207,12 +217,17 @@ Restart your terminal after any changes.
 ### Package import errors
 
 ```bash
+# If using conda:
 conda activate ds_env
+
 where python
-# Should show: C:\Users\YourName\miniconda3\envs\ds_env\python.exe
+# Should show your environment's python.exe
 
 # Reinstall a specific package
 pip install --upgrade <package-name>
+
+# If pip itself is missing:
+python -m ensurepip --default-pip
 ```
 
 ### Entity dictionaries missing
@@ -221,14 +236,22 @@ pip install --upgrade <package-name>
 python setup.py --skip-packages
 ```
 
+### Download truncated (MONDO/HGNC)
+
+If setup fails with a JSON parse error or reports truncation, delete the partial file and retry:
+
+```bash
+del entity_data\mondo.json
+python setup.py --skip-packages --update-entities
+```
+
 ---
 
 ## Checklist
 
-- [ ] Install Miniconda (no admin — "Just Me")
-- [ ] Create `ds_env` environment
-- [ ] Run `python setup.py`
+- [ ] Python 3.11+ available (via conda or standalone)
+- [ ] Run `python setup.py` (installs packages, Tesseract, entities)
 - [ ] Set API credentials (if using AI features)
-- [ ] Restart terminal
+- [ ] Restart terminal (for PATH/env var changes)
 - [ ] Open OneNote and confirm notebooks are synced
 - [ ] Run `python onenote_to_obsidian.py`
