@@ -235,6 +235,31 @@ Fixes applied:
 - Normalizes gene alias format in frontmatter and wikilinks
 - Removes duplicate entity index files (keeps canonical only)
 
+## API Cost Breakdown
+
+AI features use Claude models optimized for each task type:
+
+| Task | Model | Trigger | Input/call | Output/call |
+|------|-------|---------|------------|-------------|
+| Image analysis | Sonnet 4.6 | `--vision-ai` | ~2K–25K tokens (depends on image count) | ~500–2K tokens |
+| Tagging | Haiku 4.5 | `--ai-tags` | ~1.1K tokens (3KB body + prompt) | ~100 tokens |
+| Entity extraction (LLM) | Haiku 4.5 | `--ai-tags` | ~1.1K tokens (piggybacked) | ~200 tokens |
+| Tabular data | Sonnet 4.6 | `--vision-ai` + XLSX/CSV | ~800 tokens (schema) | ~300 tokens |
+
+### Estimated costs for a full run (~800 pages, ~500 image groups)
+
+| Feature | Model | API calls | Est. cost |
+|---------|-------|-----------|-----------|
+| `--ai-tags` (tagging + entities) | Haiku 4.5 | ~800 | **~$1.50** |
+| `--vision-ai` (images/slides) | Sonnet 4.6 | ~500 | **~$6–10** |
+| **Total full pipeline** | Mixed | ~1,300 | **~$8–12** |
+
+> **Incremental runs** only process changed pages — typically 5–20 API calls (~$0.05–$0.30).
+
+**Why Haiku for tagging?** Tagging and entity extraction are structured text-to-JSON tasks with short inputs (≤3KB). Haiku handles these at equivalent quality for ~3x less cost than Sonnet. Vision tasks require Sonnet's stronger multimodal reasoning for image understanding.
+
+**Pricing basis:** Sonnet 4.6 = $3/$15 per M tokens (input/output). Haiku 4.5 = $1/$5 per M tokens (input/output). Prices as of May 2025; check [Anthropic pricing](https://www.anthropic.com/pricing) for current rates.
+
 ## Caveats
 
 - **OneNote desktop app must be installed.** The script talks to OneNote via COM automation.
@@ -242,7 +267,7 @@ Fixes applied:
 - **One-way sync.** Changes in Obsidian are never pushed back to OneNote.
 - **Page moves** in OneNote appear as a new page + orphan.
 - **Sub-pages** are exported flat with `parent`/`children` links in frontmatter.
-- **Vision AI has costs.** Each attachment group makes one API call. Use `--notebooks` to scope runs.
+- **Vision AI has costs.** See cost breakdown above. Use `--notebooks` to scope runs.
 - **Don't run two instances** on the same vault simultaneously.
 
 ## License
