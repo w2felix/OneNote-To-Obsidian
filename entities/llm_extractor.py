@@ -50,6 +50,25 @@ Entity rules:
 - If no biomedical entities are present, return empty lists."""
 
 
+MAX_TOKENS = 1024
+RETRY_MAX_TOKENS = 2048
+
+
+def _clean_json_response(raw: str) -> str:
+    """Extract JSON from an LLM response, handling code fences and preamble."""
+    cleaned = raw.strip()
+    if cleaned.startswith('```'):
+        cleaned = re.sub(r'^```\w*\n?', '', cleaned)
+        cleaned = re.sub(r'\n?```\s*$', '', cleaned)
+        cleaned = cleaned.strip()
+    # Handle preamble text before JSON
+    if not cleaned.startswith('{'):
+        match = re.search(r'\{', cleaned)
+        if match:
+            cleaned = cleaned[match.start():]
+    return cleaned
+
+
 def extract_tags_and_entities(body_text: str, page_title: str,
                               section_path: str) -> tuple[list[str], dict]:
     """Call Claude to extract both tags and entities in a single API call.
@@ -65,24 +84,34 @@ Section: {section_path}
 Content:
 {body_truncated}"""
 
-    response = api_call_with_retry(
-        messages=[{"role": "user", "content": user_message}],
+    messages = [{"role": "user", "content": user_message}]
+
+    response, stop_reason = api_call_with_retry(
+        messages=messages,
         system=COMBINED_SYSTEM_PROMPT,
-        max_tokens=512,
+        max_tokens=MAX_TOKENS,
         model=TAGGER_MODEL,
+        return_stop_reason=True,
     )
 
-    # Parse JSON response
-    cleaned = response.strip()
-    if cleaned.startswith('```'):
-        cleaned = re.sub(r'^```\w*\n?', '', cleaned)
-        cleaned = re.sub(r'\n?```$', '', cleaned)
-        cleaned = cleaned.strip()
+    # Retry once with higher budget if truncated
+    if stop_reason == "max_tokens":
+        logger.debug("Combined tagger hit max_tokens, retrying with higher budget")
+        response, stop_reason = api_call_with_retry(
+            messages=messages,
+            system=COMBINED_SYSTEM_PROMPT,
+            max_tokens=RETRY_MAX_TOKENS,
+            model=TAGGER_MODEL,
+            return_stop_reason=True,
+        )
+
+    cleaned = _clean_json_response(response)
 
     try:
         data = json.loads(cleaned)
     except json.JSONDecodeError as e:
         logger.warning(f"Combined tagger JSON parse error: {e}")
+        logger.debug(f"Raw response ({len(response)} chars, stop={stop_reason}): {response[:500]}")
         return [], {}
 
     if not isinstance(data, dict):

@@ -19,6 +19,8 @@ Verify:
 ```bash
 conda --version
 # Should output: conda 23.x.x or newer
+conda init powershell   # or: conda init bash
+# then restart the terminal
 ```
 
 ---
