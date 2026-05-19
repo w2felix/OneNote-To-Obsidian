@@ -8,11 +8,9 @@ import json
 import logging
 import re
 
-from vision_ai.client import api_call_with_retry, VISION_MODEL
+from vision_ai.client import api_call_with_retry, TAGGER_MODEL
 
 logger = logging.getLogger(__name__)
-
-TAGGER_MODEL = VISION_MODEL
 
 COMBINED_SYSTEM_PROMPT = """You are a knowledge-base taxonomist and biomedical annotator. Given this note, return:
 1. 3-7 topic tags (lowercase, hyphenated)

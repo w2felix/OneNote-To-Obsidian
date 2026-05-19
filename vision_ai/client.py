@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 _client = None
 
 VISION_MODEL = "claude-sonnet-4-6"
+TAGGER_MODEL = "claude-haiku-4-5-20251001"
 RETRY_ATTEMPTS = 3
 RETRY_BASE_DELAY = 2.0
 RETRYABLE_STATUS_CODES = {429, 503, 529}
