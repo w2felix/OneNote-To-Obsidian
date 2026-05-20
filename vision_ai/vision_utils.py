@@ -10,6 +10,16 @@ MAX_IMAGE_DIMENSION = 2048
 JPEG_QUALITY = 85
 
 
+def _init_fitz():
+    """Import fitz and suppress noisy MuPDF structure-tree warnings."""
+    import fitz
+    try:
+        fitz.TOOLS.mupdf_display_errors(False)
+    except (AttributeError, TypeError):
+        pass
+    return fitz
+
+
 def pdf_to_images(pdf_bytes: bytes, dpi: int = 150, max_pages: int = 50,
                    page_indices: list[int] | None = None) -> list:
     """Render PDF pages to PIL Images at given DPI.
@@ -18,7 +28,7 @@ def pdf_to_images(pdf_bytes: bytes, dpi: int = 150, max_pages: int = 50,
         page_indices: If provided, render only these specific page indices.
         max_pages: Safety cap when page_indices is not specified.
     """
-    import fitz
+    fitz = _init_fitz()
     from PIL import Image
 
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -43,7 +53,7 @@ def pdf_to_images(pdf_bytes: bytes, dpi: int = 150, max_pages: int = 50,
 
 
 def pdf_page_count(pdf_bytes: bytes) -> int:
-    import fitz
+    fitz = _init_fitz()
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     count = len(doc)
     doc.close()
@@ -52,7 +62,7 @@ def pdf_page_count(pdf_bytes: bytes) -> int:
 
 def pdf_metadata(pdf_bytes: bytes) -> dict:
     """Extract basic PDF metadata: page count, orientation, text density."""
-    import fitz
+    fitz = _init_fitz()
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     page_count = len(doc)
 
