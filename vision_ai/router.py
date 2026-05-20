@@ -123,10 +123,11 @@ def _process_group(group: AttachmentGroup, images: dict[str, bytes],
         cache_key = f"{group.worker_type}_{'_'.join(Path(f).stem[:6] for f in group.filenames[:3])}"
         current_hash = group_hash(group.filenames, images)
 
-    # Check cache
+    # Check cache — still return group+filename so callout gets re-injected if missing
     if not force and is_cached(cache, cache_key, current_hash, ai_notes_dir):
         logger.debug(f"  Cached: {cache_key}")
-        return None
+        entry = cache.get('entries', {}).get(cache_key)
+        return (group, entry['ai_note_file'])
 
     # Clean up old file with bad characters in name
     old_entry = cache.get('entries', {}).get(cache_key)

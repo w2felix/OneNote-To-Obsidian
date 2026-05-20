@@ -130,13 +130,15 @@ def write_ai_note(ai_notes_dir: Path, filename: str, result: AnalysisResult,
 def inject_callout_links(page_md_path: Path, groups_and_filenames: list[tuple]):
     """Inject Obsidian callout links for all groups in a single read/write pass."""
     md_text = page_md_path.read_text(encoding='utf-8')
+    original = md_text
 
     md_text = _remove_broken_callouts(md_text)
 
     for group, ai_note_filename in groups_and_filenames:
         md_text = _inject_single_callout(md_text, group, ai_note_filename, page_md_path.name)
 
-    page_md_path.write_text(md_text, encoding='utf-8')
+    if md_text != original:
+        page_md_path.write_text(md_text, encoding='utf-8')
 
 
 _BROKEN_CALLOUT_RE = re.compile(
@@ -189,6 +191,9 @@ def _inject_single_callout(md_text: str, group, ai_note_filename: str, page_name
 
     callout_ref = f'![[{AI_NOTES_FOLDER}/{ai_note_filename}]]'
     if callout_ref in md_text:
+        return md_text
+    stem = Path(ai_note_filename).stem
+    if f'[[{AI_NOTES_FOLDER}/{stem}]]' in md_text:
         return md_text
 
     n_files = len(group.filenames)
