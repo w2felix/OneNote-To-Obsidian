@@ -9,6 +9,7 @@ from entities.dictionaries import EntityDictionaries, load_dictionaries
 logger = logging.getLogger(__name__)
 
 COMPOUND_RE = re.compile(r'\bM(\d{4})\b')
+CHEMLIB_RE = re.compile(r'\bMSC(\d{6,9})\b')
 
 # Context words that indicate biomedical content nearby (for short gene symbol validation)
 BIOMEDICAL_CONTEXT_WORDS = {
@@ -216,11 +217,24 @@ def _has_biomedical_context(text: str, pos: int, window: int = 100) -> bool:
 
 
 def _extract_compounds(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
-    """Extract M#### internal compound codes."""
+    """Extract M#### compound codes and MSC###### chemical library numbers."""
     mentions = []
     seen = set()
     for match in COMPOUND_RE.finditer(text):
         code = f"M{match.group(1)}"
+        if code in seen:
+            continue
+        seen.add(code)
+
+        mentions.append(EntityMention(
+            text=match.group(0),
+            canonical=code,
+            entity_type='compound',
+            ontology_id='',
+            confidence=1.0,
+        ))
+    for match in CHEMLIB_RE.finditer(text):
+        code = f"MSC{match.group(1)}"
         if code in seen:
             continue
         seen.add(code)

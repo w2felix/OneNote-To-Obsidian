@@ -23,7 +23,7 @@ Return ONLY a JSON object with this structure:
     "genes": ["EGFR", "KRAS"],
     "drugs": ["pembrolizumab", "osimertinib"],
     "diseases": ["NSCLC", "melanoma"],
-    "compounds": ["M1774"],
+    "compounds": ["M1774", "MSC0012345"],
     "companies": ["Roche", "AstraZeneca"],
     "roles": ["Principal Scientist", "Director"],
     "methods": ["scRNA-seq", "CRISPR", "Deep Learning"]
@@ -42,7 +42,7 @@ Entity rules:
 - genes: Use official HGNC gene symbols (uppercase). Include protein names as gene symbols.
 - drugs: Use generic drug names (not brand names). Include investigational compounds by their research name.
 - diseases: Use common abbreviations where standard (NSCLC, CRC, AML), otherwise use the full name.
-- compounds: Internal codes matching M followed by 4 digits (e.g., M1774, M3814).
+- compounds: Internal codes matching M followed by 4 digits (e.g., M1774, M3814) or MSC followed by 6–9 digits (chemical library numbers, e.g., MSC0012345).
 - companies: Pharma/biotech/diagnostics companies mentioned. Use canonical company names.
 - roles: Corporate/organizational job titles only (e.g., "Principal Scientist", "Associate Director", "Intern", "Group Leader", "Head of Data Science"). Do NOT include academic degrees (PhD, MSc), disciplines (Bioinformatics, Biology), or team names as roles.
 - methods: Experimental methods, technologies, and computational approaches (e.g., "scRNA-seq", "CRISPR", "ChIP-seq", "Deep Learning", "Flow Cytometry"). Use canonical names.
