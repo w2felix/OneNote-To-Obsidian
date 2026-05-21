@@ -129,10 +129,32 @@ def load_sync_state(output_dir: Path) -> dict:
     except (json.JSONDecodeError, OSError) as e:
         print(f"  WARNING: Corrupt sync state, starting fresh: {e}", file=sys.stderr)
         return {'version': SYNC_STATE_VERSION, 'last_sync': None, 'pages': {}}
+
+    # Schema validation - check required structure
+    if not isinstance(data, dict):
+        print(f"  WARNING: Sync state is not a dict, starting fresh", file=sys.stderr)
+        return {'version': SYNC_STATE_VERSION, 'last_sync': None, 'pages': {}}
+
+    if data.get('version') != SYNC_STATE_VERSION:
+        print(f"  WARNING: Sync state version mismatch, starting fresh", file=sys.stderr)
+        return {'version': SYNC_STATE_VERSION, 'last_sync': None, 'pages': {}}
+
+    if not isinstance(data.get('pages'), dict):
+        print(f"  WARNING: Sync state 'pages' is not a dict, starting fresh", file=sys.stderr)
+        return {'version': SYNC_STATE_VERSION, 'last_sync': None, 'pages': {}}
+
     return data
 
 
 def save_sync_state(state: dict, output_dir: Path):
+    """Save sync state atomically via temp file.
+
+    Note: Concurrent runs are NOT supported. While Path.replace() provides
+    atomic file replacement on the same filesystem, it's not multi-process safe
+    on Windows when the target file exists. Running multiple instances simultaneously
+    may cause state corruption. Consider adding file locking via msvcrt if
+    concurrent sync becomes a requirement.
+    """
     state['last_sync'] = datetime.now(timezone.utc).isoformat()
     path = output_dir / SYNC_STATE_FILE
     tmp_path = path.with_suffix('.json.tmp')
@@ -309,8 +331,21 @@ def _sanitize_error_output(text: str) -> str:
 
 
 def run_powershell_export(temp_dir: Path, page_ids: list[str] | None = None,
-                          publish_ink: bool = False) -> tuple[list[str], int]:
-    """Run PowerShell export script, return (errors, ink_page_count)."""
+                          publish_ink: bool = False, timeout: int = 3600) -> tuple[list[str], int]:
+    """Run PowerShell export script, return (errors, ink_page_count).
+
+    Args:
+        temp_dir: Directory for temporary XML files
+        page_ids: List of page IDs to export (None = all pages)
+        publish_ink: Whether to publish ink pages as PDFs
+        timeout: Maximum time in seconds to wait for export (default: 3600 = 1 hour)
+
+    Returns:
+        Tuple of (error_messages, ink_page_count)
+
+    Raises:
+        subprocess.TimeoutExpired: If export exceeds timeout
+    """
     script = generate_export_script(temp_dir, page_ids, publish_ink=publish_ink)
     script_path = temp_dir / 'export.ps1'
     script_path.write_text(script, encoding='utf-8')
@@ -323,24 +358,33 @@ def run_powershell_export(temp_dir: Path, page_ids: list[str] | None = None,
 
     errors = []
     ink_count = 0
-    for line in process.stdout:
-        line = line.strip()
-        if line.startswith('PROGRESS:'):
-            parts = line[9:].split(':', 1)
-            name = parts[1] if len(parts) > 1 else ''
-            safe_print(f'\r  Exporting pages {parts[0]} {name[:50]:<50}', end='', flush=True)
-        elif line.startswith('INK:'):
-            ink_count += 1
-        elif line.startswith('INK_ERROR:'):
-            safe_print(f'\n  [!] Ink PDF publish failed: {line[10:]}', file=sys.stderr)
-        elif line.startswith('ERROR:'):
-            errors.append(line[6:])
-        elif line == 'HIERARCHY_DONE':
-            safe_print('  Hierarchy exported.')
-        elif line == 'DONE':
-            safe_print('\n  Export complete.')
+    try:
+        for line in process.stdout:
+            line = line.strip()
+            if line.startswith('PROGRESS:'):
+                parts = line[9:].split(':', 1)
+                name = parts[1] if len(parts) > 1 else ''
+                safe_print(f'\r  Exporting pages {parts[0]} {name[:50]:<50}', end='', flush=True)
+            elif line.startswith('INK:'):
+                ink_count += 1
+            elif line.startswith('INK_ERROR:'):
+                safe_print(f'\n  [!] Ink PDF publish failed: {line[10:]}', file=sys.stderr)
+            elif line.startswith('ERROR:'):
+                errors.append(line[6:])
+            elif line == 'HIERARCHY_DONE':
+                safe_print('  Hierarchy exported.')
+            elif line == 'DONE':
+                safe_print('\n  Export complete.')
 
-    process.wait()
+        # Wait for process to complete with timeout
+        process.wait(timeout=timeout)
+
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+        safe_print(f'\n  ERROR: PowerShell export timed out after {timeout}s', file=sys.stderr)
+        raise
+
     if process.returncode != 0:
         stderr = process.stderr.read()
         stderr_safe = _sanitize_error_output(stderr)
@@ -1660,6 +1704,9 @@ def _wikify_entities(markdown: str, entities_dict: dict,
 # Sync Logic
 # ============================================================================
 
+_SKIP_PAGE_NAMES = {'Untitled', 'Untitled page', 'Neuer Abschnitt'}
+
+
 def determine_actions(state: dict, pages: list[dict], args) -> list[dict]:
     """Compare state against current pages, return list of sync actions."""
     actions = []
@@ -1672,16 +1719,32 @@ def determine_actions(state: dict, pages: list[dict], args) -> list[dict]:
         entry = state['pages'].get(key)
 
         if entry is None:
+            if page['name'] in _SKIP_PAGE_NAMES:
+                continue
             actions.append({'type': 'new', 'page': page, 'key': key})
             continue
 
         onenote_changed = (page['modified'] != entry.get('onenote_modified'))
 
         if not onenote_changed:
-            continue  # Nothing to do — even if Obsidian changed, we don't overwrite OneNote
+            needs_tags = (
+                args.ai_tags
+                and (args.ai_tags_force or key not in state.get('ai_entities', {}))
+            )
+            needs_vision = False
+            if args.vision_ai and entry.get('active_file'):
+                page_dir = Path(args.output_dir) / Path(entry['active_file']).parent
+                needs_vision = (page_dir / ATTACHMENTS_FOLDER).is_dir()
+            if needs_tags or needs_vision:
+                actions.append({'type': 'ai-enrich', 'page': page, 'key': key, 'entry': entry})
+            continue
 
         # OneNote changed — check Obsidian side
-        active_path = Path(args.output_dir) / entry['active_file']
+        active_file = entry.get('active_file')
+        if not active_file:
+            actions.append({'type': 'reexport', 'page': page, 'key': key, 'entry': entry})
+            continue
+        active_path = Path(args.output_dir) / active_file
 
         if not active_path.exists():
             if args.force_reexport or entry.get('status') != 'user_deleted':
@@ -1727,6 +1790,7 @@ def print_dry_run(actions: list[dict], state: dict):
         'reexport': ('RE-EXPORT', '[R]'),
         'orphan': ('ORPHANED (deleted from OneNote)', '[O]'),
         'keep_obsidian': ('KEEP OBSIDIAN (update state only)', '[K]'),
+        'ai-enrich': ('AI PROCESSING (tags/vision pending)', '[A]'),
     }
 
     total_skip = len(state.get('pages', {})) - sum(
@@ -1766,6 +1830,10 @@ def execute_actions(actions: list[dict], state: dict, args, temp_dir: Path,
     pages_to_export = [
         a['page'] for a in actions if a['type'] in ('new', 'update', 'conflict', 'reexport')
     ]
+    pages_to_enrich = [a for a in actions if a['type'] == 'ai-enrich']
+
+    if pages_to_enrich:
+        print(f'\n  AI processing {len(pages_to_enrich)} page(s) from disk...')
 
     if pages_to_export:
         print(f'\n  Fetching {len(pages_to_export)} page(s) from OneNote...')
@@ -1793,6 +1861,14 @@ def execute_actions(actions: list[dict], state: dict, args, temp_dir: Path,
             entry = action['entry']
             entry['status'] = 'orphaned'
             print(f'  [O] Orphaned: {entry.get("page_name", "?")}')
+            continue
+
+        if atype == 'ai-enrich':
+            entry = action['entry']
+            enrich_path = Path(args.output_dir) / entry['active_file']
+            _handle_enrich(action, state, args, enrich_path)
+            safe_print(f'\r  [A] {i+1}/{len(actions)} {page.get("name", "")[:50]:<50}',
+                       end='', flush=True)
             continue
 
         # Compute output path
@@ -1847,6 +1923,194 @@ def _handle_keep_obsidian(action, state, args, full_path, rel_path):
     }
 
 
+def _apply_ai_processing(markdown: str, page_name: str, section_path: str,
+                         key: str, state: dict, args) -> str:
+    """Run AI tags and/or entity extraction on markdown. Returns enriched markdown.
+
+    Updates state['ai_entities'] and state['ai_tags'] caches.
+    Raises on failure (caller decides how to handle).
+    """
+    run_entities = not args.no_entities
+
+    if args.ai_tags and run_entities:
+        from entities.llm_extractor import extract_tags_and_entities
+        from entities.extractor import extract_entities, EntityResult, EntityMention
+        from entities.dictionaries import load_dictionaries
+        from vision_ai.tagger import _strip_frontmatter, _content_hash, MIN_WORD_COUNT
+
+        body = _strip_frontmatter(markdown)
+        content_hash = _content_hash(body)
+
+        if 'ai_entities' not in state:
+            state['ai_entities'] = {}
+        cached = state['ai_entities'].get(key)
+        force = args.ai_tags_force or args.entities_force
+
+        wikify_map = None
+        if cached and not force and cached.get('hash') == content_hash:
+            ai_tags = cached.get('tags', [])
+            entities_dict = cached.get('entities', {})
+            wikify_map = cached.get('wikify_map')
+        else:
+            word_count = len(body.split())
+            if word_count >= MIN_WORD_COUNT:
+                dicts = load_dictionaries()
+                tier1_result = extract_entities(body, dicts)
+
+                ai_tags, llm_entities = extract_tags_and_entities(
+                    body, page_name, section_path)
+
+                tier2_result = EntityResult()
+                for plural in _ENTITY_TYPES:
+                    singular = plural.rstrip('s')
+                    if singular.endswith('ie'):
+                        singular = singular[:-2] + 'y'
+                    for name in llm_entities.get(plural, []):
+                        getattr(tier2_result, plural).append(EntityMention(
+                            text=name, canonical=name, entity_type=singular))
+
+                tier1_result.merge(tier2_result)
+                entities_dict = tier1_result.to_dict()
+                wikify_map = tier1_result.to_wikify_map()
+            else:
+                ai_tags = []
+                entities_dict = {}
+                wikify_map = None
+
+            state['ai_entities'][key] = {
+                'hash': content_hash,
+                'tags': ai_tags,
+                'entities': entities_dict,
+                'wikify_map': wikify_map,
+            }
+            if 'ai_tags' not in state:
+                state['ai_tags'] = {}
+            state['ai_tags'][key] = {'hash': content_hash, 'tags': ai_tags}
+
+        if ai_tags:
+            markdown = _inject_ai_tags(markdown, ai_tags)
+        if entities_dict:
+            markdown = _wikify_entities(markdown, entities_dict, wikify_map, page_name)
+            if args.dataview:
+                markdown = _inject_entities(markdown, entities_dict)
+
+    elif args.ai_tags:
+        from vision_ai.tagger import generate_tags
+        ai_tags = generate_tags(
+            markdown_body=markdown,
+            page_title=page_name,
+            section_path=section_path,
+            existing_tags=[],
+            state=state,
+            page_key=key,
+            force=args.ai_tags_force,
+        )
+        if ai_tags:
+            markdown = _inject_ai_tags(markdown, ai_tags)
+
+    elif run_entities:
+        from entities.extractor import extract_entities
+        from entities.dictionaries import load_dictionaries
+        from vision_ai.tagger import _strip_frontmatter, _content_hash, MIN_WORD_COUNT
+
+        body = _strip_frontmatter(markdown)
+        content_hash = _content_hash(body)
+
+        if 'ai_entities' not in state:
+            state['ai_entities'] = {}
+        cached = state['ai_entities'].get(key)
+
+        if cached and not args.entities_force and cached.get('hash') == content_hash:
+            entities_dict = cached.get('entities', {})
+            wikify_map = cached.get('wikify_map')
+        else:
+            word_count = len(body.split())
+            if word_count >= MIN_WORD_COUNT:
+                dicts = load_dictionaries()
+                result = extract_entities(body, dicts)
+                entities_dict = result.to_dict()
+                wikify_map = result.to_wikify_map()
+            else:
+                entities_dict = {}
+                wikify_map = None
+            state['ai_entities'][key] = {
+                'hash': content_hash,
+                'entities': entities_dict,
+                'wikify_map': wikify_map,
+            }
+
+        if entities_dict:
+            markdown = _wikify_entities(markdown, entities_dict, wikify_map, page_name)
+            if args.dataview:
+                markdown = _inject_entities(markdown, entities_dict)
+
+    return markdown
+
+
+def _handle_enrich(action, state, args, full_path):
+    """Apply AI tags/entities/vision to an already-exported page (reads from disk, no COM needed)."""
+    page = action['page']
+    key = action['key']
+
+    if not full_path.exists():
+        return
+
+    markdown = full_path.read_text(encoding='utf-8')
+    changed = False
+
+    # AI tags + entity extraction
+    if args.ai_tags or not args.no_entities:
+        try:
+            enriched = _apply_ai_processing(
+                markdown, page['name'], page.get('section_path', ''),
+                key, state, args)
+            if enriched != markdown:
+                markdown = enriched
+                changed = True
+        except ImportError as e:
+            safe_print(f'\n  [!] AI dependencies not available: {e}')
+        except Exception as e:
+            safe_print(f'\n  [!] AI tagging failed for {page["name"]}: {e}')
+
+    # Vision AI analysis of on-disk attachments
+    if args.vision_ai:
+        att_dir = full_path.parent / ATTACHMENTS_FOLDER
+        if att_dir.is_dir():
+            image_files = [f for f in att_dir.iterdir()
+                           if f.suffix.lower() in ('.png', '.jpg', '.jpeg', '.gif', '.bmp',
+                                                    '.pdf', '.docx', '.pptx', '.xlsx', '.csv')]
+            if image_files:
+                try:
+                    from vision_ai import analyze_page_attachments
+                    images = {f.name: f.read_bytes() for f in image_files}
+                    embed_order = _parse_embed_order(markdown)
+                    page_context = {
+                        'page_name': page['name'],
+                        'section_path': page.get('section_path', ''),
+                        'markdown_text': markdown,
+                        'parent_page': page.get('parent_page'),
+                        'embed_order': embed_order,
+                    }
+                    analyze_page_attachments(
+                        page_md_path=full_path,
+                        attachments_dir=att_dir,
+                        images=images,
+                        page_context=page_context,
+                        force=args.vision_ai_force,
+                    )
+                except ImportError as e:
+                    safe_print(f'\n  [!] Vision AI dependencies not installed: {e}')
+                except Exception as e:
+                    safe_print(f'\n  [!] Vision AI failed for {page["name"]}: {e}')
+
+    if changed:
+        full_path.write_text(markdown, encoding='utf-8')
+    # Update state hash (vision AI may have modified the file via callout injection)
+    if changed or args.vision_ai:
+        state['pages'][key]['content_hash'] = file_hash(full_path)
+        state['pages'][key]['file_mtime'] = full_path.stat().st_mtime
+
+
 def _parse_embed_order(markdown: str) -> list[dict]:
     """Parse the embed order from generated markdown for Vision AI context."""
     embed_order = []
@@ -1891,8 +2155,6 @@ def _parse_embed_order(markdown: str) -> list[dict]:
 
     return embed_order
 
-
-_SKIP_PAGE_NAMES = {'Untitled', 'Untitled page', 'Neuer Abschnitt'}
 
 _INK_SECTION_HEADER = '## Handwritten Notes'
 
@@ -1967,126 +2229,11 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
             return
 
     # AI semantic tags + entity extraction
-    run_entities = not args.no_entities
-    if (args.ai_tags or run_entities) and not args.dry_run:
+    if (args.ai_tags or not args.no_entities) and not args.dry_run:
         try:
-            if args.ai_tags and run_entities:
-                # Combined: single API call returns both tags and entities
-                from entities.llm_extractor import extract_tags_and_entities
-                from entities.extractor import extract_entities, EntityResult, EntityMention
-                from entities.dictionaries import load_dictionaries
-                from vision_ai.tagger import _strip_frontmatter, _content_hash, MIN_WORD_COUNT
-
-                body = _strip_frontmatter(markdown)
-                content_hash = _content_hash(body)
-
-                # Check cache
-                if 'ai_entities' not in state:
-                    state['ai_entities'] = {}
-                cached = state['ai_entities'].get(key)
-                force = args.ai_tags_force or args.entities_force
-
-                wikify_map = None
-                if cached and not force and cached.get('hash') == content_hash:
-                    ai_tags = cached.get('tags', [])
-                    entities_dict = cached.get('entities', {})
-                else:
-                    word_count = len(body.split())
-                    if word_count >= MIN_WORD_COUNT:
-                        # Tier 1: local dictionary extraction
-                        dicts = load_dictionaries()
-                        tier1_result = extract_entities(body, dicts)
-
-                        # Tier 2: LLM co-extraction
-                        ai_tags, llm_entities = extract_tags_and_entities(
-                            body, page['name'], page.get('section_path', ''))
-
-                        # Merge: Tier 1 takes precedence, LLM adds net-new
-                        tier2_result = EntityResult()
-                        for plural in _ENTITY_TYPES:
-                            singular = plural.rstrip('s')
-                            if singular.endswith('ie'):
-                                singular = singular[:-2] + 'y'
-                            for name in llm_entities.get(plural, []):
-                                getattr(tier2_result, plural).append(EntityMention(
-                                    text=name, canonical=name, entity_type=singular))
-
-                        tier1_result.merge(tier2_result)
-                        entities_dict = tier1_result.to_dict()
-                        wikify_map = tier1_result.to_wikify_map()
-                    else:
-                        ai_tags = []
-                        entities_dict = {}
-                        wikify_map = None
-
-                    # Cache both
-                    state['ai_entities'][key] = {
-                        'hash': content_hash,
-                        'tags': ai_tags,
-                        'entities': entities_dict,
-                    }
-                    # Also update ai_tags cache for compatibility
-                    if 'ai_tags' not in state:
-                        state['ai_tags'] = {}
-                    state['ai_tags'][key] = {'hash': content_hash, 'tags': ai_tags}
-
-                if ai_tags:
-                    markdown = _inject_ai_tags(markdown, ai_tags)
-                if entities_dict:
-                    markdown = _wikify_entities(markdown, entities_dict, wikify_map, page['name'])
-                    if args.dataview:
-                        markdown = _inject_entities(markdown, entities_dict)
-
-            elif args.ai_tags:
-                from vision_ai.tagger import generate_tags
-                ai_tags = generate_tags(
-                    markdown_body=markdown,
-                    page_title=page['name'],
-                    section_path=page.get('section_path', ''),
-                    existing_tags=[],
-                    state=state,
-                    page_key=key,
-                    force=args.ai_tags_force,
-                )
-                if ai_tags:
-                    markdown = _inject_ai_tags(markdown, ai_tags)
-
-            elif run_entities:
-                # Tier 1 only (no API call) — fast local extraction
-                from entities.extractor import extract_entities
-                from entities.dictionaries import load_dictionaries
-                from vision_ai.tagger import _strip_frontmatter, _content_hash, MIN_WORD_COUNT
-
-                body = _strip_frontmatter(markdown)
-                content_hash = _content_hash(body)
-
-                if 'ai_entities' not in state:
-                    state['ai_entities'] = {}
-                cached = state['ai_entities'].get(key)
-
-                if cached and not args.entities_force and cached.get('hash') == content_hash:
-                    entities_dict = cached.get('entities', {})
-                    wikify_map = None
-                else:
-                    word_count = len(body.split())
-                    if word_count >= MIN_WORD_COUNT:
-                        dicts = load_dictionaries()
-                        result = extract_entities(body, dicts)
-                        entities_dict = result.to_dict()
-                        wikify_map = result.to_wikify_map()
-                    else:
-                        entities_dict = {}
-                        wikify_map = None
-                    state['ai_entities'][key] = {
-                        'hash': content_hash,
-                        'entities': entities_dict,
-                    }
-
-                if entities_dict:
-                    markdown = _wikify_entities(markdown, entities_dict, wikify_map, page['name'])
-                    if args.dataview:
-                        markdown = _inject_entities(markdown, entities_dict)
-
+            markdown = _apply_ai_processing(
+                markdown, page['name'], page.get('section_path', ''),
+                key, state, args)
         except ImportError as e:
             print(f'\n  [!] Entity/tag dependencies not available: {e}')
         except Exception as e:
@@ -2379,6 +2526,12 @@ Write-Output "DONE"
             print_dry_run(actions, state)
         else:
             execute_actions(actions, state, args, temp_dir, page_id_map, all_page_names)
+            state['last_run'] = {
+                'ai_tags': args.ai_tags,
+                'vision_ai': args.vision_ai,
+                'entities': not args.no_entities,
+                'dataview': args.dataview,
+            }
             save_sync_state(state, args.output_dir)
 
             # Entity index generation (only in --dataview mode)

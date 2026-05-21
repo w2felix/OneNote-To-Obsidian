@@ -118,18 +118,42 @@ class EntityResult:
         return not any(getattr(self, t) for t in self.ENTITY_TYPES)
 
     def merge(self, other: 'EntityResult'):
-        """Merge another EntityResult, deduplicating by canonical name and ontology ID."""
+        """Merge another EntityResult, deduplicating by canonical name and ontology ID.
+
+        When entities have the same canonical name (case-insensitive), prefers the one
+        with an ontology ID (from dictionary extraction) over one without (from LLM).
+        """
         for entity_type in self.ENTITY_TYPES:
-            existing_names = {m.canonical.lower() for m in getattr(self, entity_type)}
+            # Build lookup of existing entities by name and ID
+            existing_by_name = {m.canonical.lower(): m for m in getattr(self, entity_type)}
             existing_ids = {m.ontology_id for m in getattr(self, entity_type) if m.ontology_id}
+
             for m in getattr(other, entity_type):
+                # Skip if ontology ID already present
                 if m.ontology_id and m.ontology_id in existing_ids:
                     continue
-                if m.canonical.lower() not in existing_names:
-                    getattr(self, entity_type).append(m)
-                    existing_names.add(m.canonical.lower())
-                    if m.ontology_id:
-                        existing_ids.add(m.ontology_id)
+
+                name_key = m.canonical.lower()
+
+                # If name exists, only replace if new one has ID and old one doesn't
+                if name_key in existing_by_name:
+                    existing = existing_by_name[name_key]
+                    if m.ontology_id and not existing.ontology_id:
+                        # Replace: new entity has ID, existing doesn't
+                        entities_list = getattr(self, entity_type)
+                        idx = entities_list.index(existing)
+                        entities_list[idx] = m
+                        existing_by_name[name_key] = m
+                        if m.ontology_id:
+                            existing_ids.add(m.ontology_id)
+                    # Otherwise keep existing (either both have IDs, or existing has ID)
+                    continue
+
+                # New entity - add it
+                getattr(self, entity_type).append(m)
+                existing_by_name[name_key] = m
+                if m.ontology_id:
+                    existing_ids.add(m.ontology_id)
 
     def to_dict(self, dicts: 'EntityDictionaries | None' = None) -> dict:
         """Serialize for YAML frontmatter and caching.
@@ -281,10 +305,11 @@ def _extract_genes(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
         else:
             continue
 
-        # Short symbols (<=3 chars) or short aliases need stricter validation
+        # Short symbols need stricter validation (check canonical, not alias)
+        # Short aliases (<=4 chars) also need context unless canonical is always-valid
         needs_context = (
-            (len(candidate) <= 3 and candidate not in ALWAYS_VALID_GENES)
-            or (is_alias and len(candidate) <= 4)
+            (len(canonical) <= 3 and canonical not in ALWAYS_VALID_GENES)
+            or (is_alias and len(candidate) <= 4 and canonical not in ALWAYS_VALID_GENES)
         )
         if needs_context:
             if not _has_biomedical_context(text, match.start()):
@@ -305,12 +330,14 @@ def _extract_genes(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
 
 
 _disease_word_index: dict[str, list[str]] | None = None
+_disease_patterns: dict[str, re.Pattern] | None = None
 
 
 def _reset_disease_word_index():
     """Clear cached disease word index (called on dictionary reload)."""
-    global _disease_word_index
+    global _disease_word_index, _disease_patterns
     _disease_word_index = None
+    _disease_patterns = None
 
 
 def _get_disease_word_index(dicts: EntityDictionaries) -> dict[str, list[str]]:
@@ -318,11 +345,13 @@ def _get_disease_word_index(dicts: EntityDictionaries) -> dict[str, list[str]]:
 
     This makes disease lookup O(words_in_text) instead of O(diseases_in_ontology).
     """
-    global _disease_word_index
+    global _disease_word_index, _disease_patterns
     if _disease_word_index is not None:
         return _disease_word_index
 
     index: dict[str, list[str]] = {}
+    patterns: dict[str, re.Pattern] = {}
+
     for disease_key in dicts.disease_names:
         if len(disease_key) < 4:
             continue
@@ -332,7 +361,12 @@ def _get_disease_word_index(dicts: EntityDictionaries) -> dict[str, list[str]]:
             longest = max(words, key=len)
             index.setdefault(longest, []).append(disease_key)
 
+        # Pre-compile word-boundary regex pattern for this disease
+        # Escaped to handle special regex chars, wrapped with \b for word boundaries
+        patterns[disease_key] = re.compile(r'\b' + re.escape(disease_key) + r'\b', re.IGNORECASE)
+
     _disease_word_index = index
+    _disease_patterns = patterns
     return index
 
 
@@ -368,7 +402,7 @@ _FALSE_POSITIVE_DISEASES = {
 
 
 def _extract_diseases(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
-    """Extract disease names using MONDO dictionary with inverted word index."""
+    """Extract disease names using MONDO dictionary with inverted word index and pre-compiled patterns."""
     if not dicts.disease_names:
         return []
 
@@ -385,28 +419,23 @@ def _extract_diseases(text: str, dicts: EntityDictionaries) -> list[EntityMentio
         if word in word_index:
             candidates.update(word_index[word])
 
+    # Use pre-compiled patterns for faster word-boundary matching
     for disease_key in candidates:
         if disease_key in _GENERIC_DISEASE_TERMS:
             continue
         if disease_key in _FALSE_POSITIVE_DISEASES:
             continue
 
-        # Find a word-boundary-valid occurrence (scan all positions)
-        start = 0
-        found = False
-        pos = -1
-        while True:
-            pos = text_lower.find(disease_key, start)
-            if pos == -1:
-                break
-            end = pos + len(disease_key)
-            if (pos == 0 or not text_lower[pos - 1].isalnum()) and \
-               (end >= len(text_lower) or not text_lower[end].isalnum()):
-                found = True
-                break
-            start = pos + 1
-        if not found:
+        # Use pre-compiled regex pattern for word-boundary matching
+        pattern = _disease_patterns.get(disease_key)
+        if not pattern:
             continue
+
+        match = pattern.search(text_lower)
+        if not match:
+            continue
+
+        pos = match.start()
 
         # Single-word disease keys require biomedical context nearby
         if ' ' not in disease_key:

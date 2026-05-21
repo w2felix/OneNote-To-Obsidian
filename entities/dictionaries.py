@@ -70,7 +70,18 @@ def load_dictionaries() -> EntityDictionaries:
         with open(hgnc_path, encoding='utf-8') as f:
             data = json.load(f)
 
+        # Validate structure and minimum expected size
+        if not isinstance(data, dict):
+            raise ValueError(f"HGNC genes file has invalid structure: expected dict, got {type(data)}")
+
         genes = data.get('genes', {})
+        if not isinstance(genes, dict):
+            raise ValueError(f"HGNC 'genes' has invalid structure: expected dict, got {type(genes)}")
+
+        # HGNC has ~20,000+ genes - if we have significantly fewer, file may be corrupted
+        if len(genes) < 1000:
+            raise ValueError(f"HGNC genes file appears corrupted: only {len(genes)} genes found (expected 20,000+)")
+
         dicts.gene_symbols = set(genes.keys())
         dicts.gene_info = genes
         dicts.gene_aliases = data.get('alias_map', {})
@@ -85,7 +96,17 @@ def load_dictionaries() -> EntityDictionaries:
     mondo_path = DATA_DIR / 'mondo_diseases.json'
     if mondo_path.exists():
         with open(mondo_path, encoding='utf-8') as f:
-            dicts.disease_names = json.load(f)
+            diseases = json.load(f)
+
+        # Validate structure and minimum expected size
+        if not isinstance(diseases, dict):
+            raise ValueError(f"MONDO diseases file has invalid structure: expected dict, got {type(diseases)}")
+
+        # MONDO has ~20,000+ disease entries - if we have significantly fewer, file may be corrupted
+        if len(diseases) < 1000:
+            raise ValueError(f"MONDO diseases file appears corrupted: only {len(diseases)} entries found (expected 20,000+)")
+
+        dicts.disease_names = diseases
         logger.debug(f"Loaded {len(dicts.disease_names)} disease entries")
     else:
         logger.warning(f"MONDO diseases file not found: {mondo_path}")
