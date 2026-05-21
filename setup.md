@@ -75,12 +75,14 @@ python setup.py --setup-tesseract
 
 Required only for `--vision-ai` and `--ai-tags`.
 
-**Corporate proxy setup:**
+**Corporate proxy setup (Palantir Foundry / LMS):**
 
 ```powershell
-[Environment]::SetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN", "your-token", "User")
-[Environment]::SetEnvironmentVariable("ANTHROPIC_BASE_URL", "https://your-proxy-url/api/proxy/anthropic", "User")
+[Environment]::SetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN", "YOUR TOKEN HERE", "User")
+[Environment]::SetEnvironmentVariable("ANTHROPIC_BASE_URL", "https://your-palantir-instance/language-model-service/api/proxy/anthropic", "User")
 ```
+
+The token is a Palantir JWT. The script sends it as `Authorization: Bearer <token>` (not as `x-api-key`), which is what the Foundry proxy expects.
 
 **Direct Anthropic API:**
 
@@ -205,6 +207,10 @@ This is handled automatically now — `setup.py` downloads it from GitHub. If it
 [Environment]::GetEnvironmentVariable('ANTHROPIC_AUTH_TOKEN', 'User')
 [Environment]::GetEnvironmentVariable('ANTHROPIC_BASE_URL', 'User')
 ```
+
+If you get a `401 UNAUTHORIZED` error:
+- **Corporate proxy**: Ensure `ANTHROPIC_AUTH_TOKEN` is a valid Palantir JWT (starts with `eyJ...`). Tokens expire — regenerate via the Foundry token settings.
+- **Direct API**: Ensure `ANTHROPIC_API_KEY` starts with `sk-ant-`.
 
 Restart your terminal after any changes.
 
