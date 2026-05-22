@@ -2076,14 +2076,16 @@ def _handle_enrich(action, state, args, full_path):
     if args.vision_ai:
         att_dir = full_path.parent / ATTACHMENTS_FOLDER
         if att_dir.is_dir():
+            embed_order = _parse_embed_order(markdown)
+            referenced = {e['filename'] for e in embed_order if e['type'] in ('image', 'file')}
             image_files = [f for f in att_dir.iterdir()
                            if f.suffix.lower() in ('.png', '.jpg', '.jpeg', '.gif', '.bmp',
-                                                    '.pdf', '.docx', '.pptx', '.xlsx', '.csv')]
+                                                    '.pdf', '.docx', '.pptx', '.xlsx', '.csv')
+                           and f.name in referenced]
             if image_files:
                 try:
                     from vision_ai import analyze_page_attachments
                     images = {f.name: f.read_bytes() for f in image_files}
-                    embed_order = _parse_embed_order(markdown)
                     page_context = {
                         'page_name': page['name'],
                         'section_path': page.get('section_path', ''),
@@ -2127,16 +2129,16 @@ def _parse_embed_order(markdown: str) -> list[dict]:
 
     for line in lines[start:]:
         stripped = line.strip()
-        # Match ![[_attachments/filename]] or [[_attachments/filename]]
-        embed_match = re.match(r'!?\[\[_attachments/(.+?)\]\]', stripped)
+        # Match ![[_attachments/filename]] or [[_attachments/filename]] (anywhere on line)
+        embed_match = re.search(r'(!?\[\[_attachments/(.+?)\]\])', stripped)
         if embed_match:
             if current_text:
                 text = '\n'.join(current_text).strip()
                 if text:
                     embed_order.append({'type': 'text', 'filename': '', 'text': text})
                 current_text = []
-            filename = embed_match.group(1)
-            embed_order.append({'type': 'image' if stripped.startswith('!') else 'file',
+            filename = embed_match.group(2)
+            embed_order.append({'type': 'image' if embed_match.group(1).startswith('!') else 'file',
                                 'filename': filename, 'text': ''})
         elif stripped.startswith('#'):
             if current_text:
