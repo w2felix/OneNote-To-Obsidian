@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.svg" width="180" alt="OneNote to Obsidian">
+</p>
+
 # Setup Guide
 
 Step-by-step installation for OneNote to Obsidian Sync.

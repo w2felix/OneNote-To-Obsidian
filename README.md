@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.svg" width="180" alt="OneNote to Obsidian">
+</p>
+
 # OneNote to Obsidian Sync
 
 Exports OneNote notebooks to Obsidian-compatible Markdown with incremental sync, AI-powered tagging, biomedical entity linking, and handwriting transcription.
