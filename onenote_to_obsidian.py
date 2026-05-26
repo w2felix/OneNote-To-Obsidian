@@ -16,6 +16,7 @@ import base64
 import hashlib
 import html
 import json
+import os
 import re
 import subprocess
 import sys
@@ -122,10 +123,10 @@ def parse_args():
 
 def load_sync_state(output_dir: Path) -> dict:
     path = output_dir / SYNC_STATE_FILE
-    if not path.exists():
+    if not _path_exists_safe(path):
         return {'version': SYNC_STATE_VERSION, 'last_sync': None, 'pages': {}}
     try:
-        data = json.loads(path.read_text(encoding='utf-8'))
+        data = json.loads(_read_text_safe(path))
     except (json.JSONDecodeError, OSError) as e:
         print(f"  WARNING: Corrupt sync state, starting fresh: {e}", file=sys.stderr)
         return {'version': SYNC_STATE_VERSION, 'last_sync': None, 'pages': {}}
@@ -158,25 +159,59 @@ def save_sync_state(state: dict, output_dir: Path):
     state['last_sync'] = datetime.now(timezone.utc).isoformat()
     path = output_dir / SYNC_STATE_FILE
     tmp_path = path.with_suffix('.json.tmp')
-    tmp_path.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding='utf-8')
-    tmp_path.replace(path)
+    _write_text_safe(tmp_path, json.dumps(state, indent=2, ensure_ascii=False))
+    os.replace(_win_safe_path(tmp_path), _win_safe_path(path))
 
 
 def page_key(page_id: str) -> str:
     return hashlib.sha256(page_id.encode()).hexdigest()[:16]
 
 
+def _win_safe_path(path: Path) -> str:
+    """Return path string with Windows extended-length prefix to support paths over 259 chars."""
+    s = str(path.resolve())
+    return '\\\\?\\' + s if sys.platform == 'win32' and not s.startswith('\\\\?\\') else s
+
+
+def _mkdir_safe(path: Path, exist_ok: bool = False) -> None:
+    os.makedirs(_win_safe_path(path), exist_ok=exist_ok)
+
+
+def _write_bytes_safe(path: Path, data: bytes) -> None:
+    with open(_win_safe_path(path), 'wb') as f:
+        f.write(data)
+
+
+def _write_text_safe(path: Path, text: str, encoding: str = 'utf-8') -> None:
+    with open(_win_safe_path(path), 'w', encoding=encoding) as f:
+        f.write(text)
+
+
+def _read_text_safe(path: Path, encoding: str = 'utf-8') -> str:
+    with open(_win_safe_path(path), encoding=encoding) as f:
+        return f.read()
+
+
+def _read_bytes_safe(path: Path) -> bytes:
+    with open(_win_safe_path(path), 'rb') as f:
+        return f.read()
+
+
+def _path_exists_safe(path: Path) -> bool:
+    return os.path.exists(_win_safe_path(path))
+
+
 def file_hash(filepath: Path) -> str:
-    if not filepath.exists():
+    if not _path_exists_safe(filepath):
         return ''
-    return hashlib.sha256(filepath.read_bytes()).hexdigest()[:16]
+    return hashlib.sha256(_read_bytes_safe(filepath)).hexdigest()[:16]
 
 
 def file_hash_if_modified(filepath: Path, stored_hash: str, stored_mtime: float | None) -> str:
     """Only compute hash if file mtime changed since last sync. Returns current hash."""
-    if not filepath.exists():
+    if not _path_exists_safe(filepath):
         return ''
-    current_mtime = filepath.stat().st_mtime
+    current_mtime = os.stat(_win_safe_path(filepath)).st_mtime
     if stored_mtime is not None and current_mtime == stored_mtime:
         return stored_hash
     return file_hash(filepath)
@@ -1183,9 +1218,9 @@ def _convert_inserted_file(file_elem, ns, images: dict) -> str:
 
     if file_data is None:
         cache_path = file_elem.get('pathCache', '')
-        if cache_path and _is_safe_cache_path(cache_path) and Path(cache_path).exists():
+        if cache_path and _is_safe_cache_path(cache_path) and _path_exists_safe(Path(cache_path)):
             try:
-                file_data = Path(cache_path).read_bytes()
+                file_data = _read_bytes_safe(Path(cache_path))
             except Exception:
                 pass
 
@@ -1705,6 +1740,21 @@ def _wikify_entities(markdown: str, entities_dict: dict,
 # ============================================================================
 
 _SKIP_PAGE_NAMES = {'Untitled', 'Untitled page', 'Neuer Abschnitt'}
+# Mirror vision_ai/output.py::AI_NOTES_FOLDER and vision_ai/cache.py::CACHE_FILE
+_AI_NOTES_FOLDER_NAME = '_ai_notes'
+_VISION_CACHE_FILENAME = '.vision_ai_cache.json'
+_AI_NOTES_CACHE_SUBPATH = f'{_AI_NOTES_FOLDER_NAME}/{_VISION_CACHE_FILENAME}'
+
+
+def _att_folder_hash(att_dir: Path) -> str:
+    """Fast metadata hash of an attachments folder (no file bytes read)."""
+    with os.scandir(_win_safe_path(att_dir)) as it:
+        entries = sorted(
+            (e.name, int(st.st_mtime * 1000), st.st_size)
+            for e in it if e.is_file()
+            for st in (e.stat(),)
+        )
+    return hashlib.sha256(str(entries).encode()).hexdigest()[:16]
 
 
 def determine_actions(state: dict, pages: list[dict], args) -> list[dict]:
@@ -1734,7 +1784,19 @@ def determine_actions(state: dict, pages: list[dict], args) -> list[dict]:
             needs_vision = False
             if args.vision_ai and entry.get('active_file'):
                 page_dir = Path(args.output_dir) / Path(entry['active_file']).parent
-                needs_vision = (page_dir / ATTACHMENTS_FOLDER).is_dir()
+                att_dir = page_dir / ATTACHMENTS_FOLDER
+                if os.path.isdir(_win_safe_path(att_dir)):
+                    if args.vision_ai_force:
+                        needs_vision = True
+                    else:
+                        att_hash = _att_folder_hash(att_dir)
+                        stored = entry.get('vision_att_hash')
+                        if stored is None:
+                            # Backfill: if cache file already exists, page was processed before
+                            if _path_exists_safe(page_dir / _AI_NOTES_CACHE_SUBPATH):
+                                entry['vision_att_hash'] = att_hash
+                                stored = att_hash
+                        needs_vision = (stored != att_hash)
             if needs_tags or needs_vision:
                 actions.append({'type': 'ai-enrich', 'page': page, 'key': key, 'entry': entry})
             continue
@@ -1746,7 +1808,7 @@ def determine_actions(state: dict, pages: list[dict], args) -> list[dict]:
             continue
         active_path = Path(args.output_dir) / active_file
 
-        if not active_path.exists():
+        if not _path_exists_safe(active_path):
             if args.force_reexport or entry.get('status') != 'user_deleted':
                 actions.append({'type': 'reexport', 'page': page, 'key': key, 'entry': entry})
             continue
@@ -1918,9 +1980,11 @@ def _handle_keep_obsidian(action, state, args, full_path, rel_path):
         'page_name': page['name'],
         'onenote_modified': page['modified'],
         'active_file': rel_path,
-        'content_hash': file_hash(full_path) if full_path.exists() else '',
+        'content_hash': file_hash(full_path) if _path_exists_safe(full_path) else '',
         'status': 'synced',
     }
+    if action.get('entry', {}).get('vision_att_hash'):
+        state['pages'][key]['vision_att_hash'] = action['entry']['vision_att_hash']
 
 
 def _apply_ai_processing(markdown: str, page_name: str, section_path: str,
@@ -2052,10 +2116,10 @@ def _handle_enrich(action, state, args, full_path):
     page = action['page']
     key = action['key']
 
-    if not full_path.exists():
+    if not _path_exists_safe(full_path):
         return
 
-    markdown = full_path.read_text(encoding='utf-8')
+    markdown = _read_text_safe(full_path)
     changed = False
 
     # AI tags + entity extraction
@@ -2075,17 +2139,21 @@ def _handle_enrich(action, state, args, full_path):
     # Vision AI analysis of on-disk attachments
     if args.vision_ai:
         att_dir = full_path.parent / ATTACHMENTS_FOLDER
-        if att_dir.is_dir():
+        if os.path.isdir(_win_safe_path(att_dir)):
             embed_order = _parse_embed_order(markdown)
             referenced = {e['filename'] for e in embed_order if e['type'] in ('image', 'file')}
-            image_files = [f for f in att_dir.iterdir()
-                           if f.suffix.lower() in ('.png', '.jpg', '.jpeg', '.gif', '.bmp',
-                                                    '.pdf', '.docx', '.pptx', '.xlsx', '.csv')
-                           and f.name in referenced]
+            with os.scandir(_win_safe_path(att_dir)) as scan:
+                image_files = [att_dir / e.name for e in scan
+                               if e.is_file()
+                               and Path(e.name).suffix.lower() in ('.png', '.jpg', '.jpeg',
+                                                                    '.gif', '.bmp', '.pdf',
+                                                                    '.docx', '.pptx', '.xlsx',
+                                                                    '.csv')
+                               and e.name in referenced]
             if image_files:
                 try:
                     from vision_ai import analyze_page_attachments
-                    images = {f.name: f.read_bytes() for f in image_files}
+                    images = {f.name: _read_bytes_safe(f) for f in image_files}
                     page_context = {
                         'page_name': page['name'],
                         'section_path': page.get('section_path', ''),
@@ -2106,11 +2174,17 @@ def _handle_enrich(action, state, args, full_path):
                     safe_print(f'\n  [!] Vision AI failed for {page["name"]}: {e}')
 
     if changed:
-        full_path.write_text(markdown, encoding='utf-8')
+        _write_text_safe(full_path, markdown)
     # Update state hash (vision AI may have modified the file via callout injection)
     if changed or args.vision_ai:
         state['pages'][key]['content_hash'] = file_hash(full_path)
-        state['pages'][key]['file_mtime'] = full_path.stat().st_mtime
+        state['pages'][key]['file_mtime'] = os.stat(_win_safe_path(full_path)).st_mtime
+    if args.vision_ai:
+        att_dir = full_path.parent / ATTACHMENTS_FOLDER
+        if os.path.isdir(_win_safe_path(att_dir)):
+            # Store even when image_files was empty: prevents re-entry for folders with
+            # no processable attachments on the next incremental run.
+            state['pages'][key]['vision_att_hash'] = _att_folder_hash(att_dir)
 
 
 def _parse_embed_order(markdown: str) -> list[dict]:
@@ -2166,7 +2240,7 @@ def _transcribe_ink_via_vision(pdf_path: Path, page_name: str, section_path: str
     from vision_ai.vision_utils import pdf_to_images, encode_image, build_vision_message
     from vision_ai.client import api_call_with_retry, VISION_MODEL
 
-    pdf_bytes = pdf_path.read_bytes()
+    pdf_bytes = _read_bytes_safe(pdf_path)
     try:
         pil_images = pdf_to_images(pdf_bytes, dpi=200, max_pages=3)
     except Exception as e:
@@ -2280,15 +2354,15 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
             markdown = markdown[:yaml_close] + f'\nlanguage: {lang}' + markdown[yaml_close:]
 
     # Write markdown file
-    full_path.parent.mkdir(parents=True, exist_ok=True)
-    full_path.write_text(markdown, encoding='utf-8')
+    _mkdir_safe(full_path.parent, exist_ok=True)
+    _write_text_safe(full_path, markdown)
 
     # Write images
     if images:
         att_dir = full_path.parent / ATTACHMENTS_FOLDER
-        att_dir.mkdir(exist_ok=True)
+        _mkdir_safe(att_dir, exist_ok=True)
         for img_name, img_data in images.items():
-            (att_dir / img_name).write_bytes(img_data)
+            _write_bytes_safe(att_dir / img_name, img_data)
 
     # Vision AI post-processing
     if args.vision_ai and images and not args.dry_run:
@@ -2325,9 +2399,13 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
         'onenote_modified': page['modified'],
         'active_file': rel_path,
         'content_hash': file_hash(full_path),
-        'file_mtime': full_path.stat().st_mtime if full_path.exists() else None,
+        'file_mtime': os.stat(_win_safe_path(full_path)).st_mtime if _path_exists_safe(full_path) else None,
         'status': 'synced',
     }
+    if args.vision_ai and not args.dry_run:
+        att_dir = full_path.parent / ATTACHMENTS_FOLDER
+        if os.path.isdir(_win_safe_path(att_dir)):
+            state['pages'][key]['vision_att_hash'] = _att_folder_hash(att_dir)
 
 
 def _handle_conflict(action, state, args, temp_dir, full_path, out_dir, rel_path,
@@ -2355,7 +2433,7 @@ def _handle_conflict(action, state, args, temp_dir, full_path, out_dir, rel_path
 
     # Handle same-day repeat conflicts
     counter = 2
-    while conflict_path.exists():
+    while _path_exists_safe(conflict_path):
         conflict_name = f'{base_name} (OneNote conflict {today} #{counter}).md'
         conflict_path = full_path.parent / conflict_name
         counter += 1
@@ -2375,15 +2453,15 @@ def _handle_conflict(action, state, args, temp_dir, full_path, out_dir, rel_path
         markdown = conflict_header + markdown
 
     # Write conflict file
-    full_path.parent.mkdir(parents=True, exist_ok=True)
-    conflict_path.write_text(markdown, encoding='utf-8')
+    _mkdir_safe(full_path.parent, exist_ok=True)
+    _write_text_safe(conflict_path, markdown)
 
     # Write images for conflict file
     if images:
         att_dir = full_path.parent / ATTACHMENTS_FOLDER
-        att_dir.mkdir(exist_ok=True)
+        _mkdir_safe(att_dir, exist_ok=True)
         for img_name, img_data in images.items():
-            (att_dir / img_name).write_bytes(img_data)
+            _write_bytes_safe(att_dir / img_name, img_data)
 
     # Update state: keep active_file pointing to user's file, update timestamps
     active_path = Path(args.output_dir) / entry['active_file']
@@ -2396,6 +2474,8 @@ def _handle_conflict(action, state, args, temp_dir, full_path, out_dir, rel_path
         'content_hash': file_hash(active_path),
         'status': 'conflict',
     }
+    if entry.get('vision_att_hash'):
+        state['pages'][key]['vision_att_hash'] = entry['vision_att_hash']
 
 
 # ============================================================================
@@ -2446,7 +2526,7 @@ def main():
             sys.exit(1)
 
     # Load existing sync state
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+    _mkdir_safe(args.output_dir, exist_ok=True)
     state = load_sync_state(args.output_dir)
     is_first_run = state.get('last_sync') is None
 
