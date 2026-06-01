@@ -49,6 +49,9 @@ python onenote_to_obsidian.py --ai-tags
 # Only sync specific notebooks
 python onenote_to_obsidian.py --notebooks "Work" "Personal"
 
+# Exclude specific notebooks from sync
+python onenote_to_obsidian.py --exclude-notebooks "Archive" "Personal"
+
 # Preview changes without writing anything
 python onenote_to_obsidian.py --dry-run
 
@@ -67,6 +70,7 @@ python onenote_to_obsidian.py --vision-ai --ai-tags
 |------|-------------|
 | `--output-dir PATH` | Where to write the vault (default: `./obsidian_export`) |
 | `--notebooks "Name1" "Name2"` | Only sync specific notebooks (default: all) |
+| `--exclude-notebooks "Name1" "Name2"` | Exclude specific notebooks from sync |
 | `--vault-mode single\|multi` | `single` = one vault; `multi` = one vault per notebook |
 | `--skip-images` | Text-only export (no images or file attachments) |
 | `--dry-run` | Preview what would change without writing |

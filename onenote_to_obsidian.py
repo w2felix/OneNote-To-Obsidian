@@ -60,6 +60,10 @@ def parse_args():
         help='Specific notebook names to sync (default: all)'
     )
     parser.add_argument(
+        '--exclude-notebooks', nargs='+', default=None, metavar='NOTEBOOK',
+        help='Notebook names to exclude from sync (cannot be combined with --notebooks)'
+    )
+    parser.add_argument(
         '--vault-mode', choices=['single', 'multi'], default='single',
         help='single = one vault with all notebooks; multi = separate vault per notebook'
     )
@@ -473,12 +477,18 @@ def _parse_container(elem, container):
         container['sections'].append(section)
 
 
-def collect_all_pages(notebooks: list[dict], notebook_filter: list[str] | None = None) -> list[dict]:
+def collect_all_pages(
+    notebooks: list[dict],
+    notebook_filter: list[str] | None = None,
+    notebook_exclude: list[str] | None = None,
+) -> list[dict]:
     """Flatten hierarchy into list of pages with path info."""
     pages = []
 
     for nb in notebooks:
         if notebook_filter and nb['name'] not in notebook_filter:
+            continue
+        if notebook_exclude and nb['name'] in notebook_exclude:
             continue
         _collect_from_container(nb, nb['name'], pages)
 
@@ -1987,6 +1997,130 @@ def _handle_keep_obsidian(action, state, args, full_path, rel_path):
         state['pages'][key]['vision_att_hash'] = action['entry']['vision_att_hash']
 
 
+def _infer_type_and_domain(notebook: str, section: str, tags: list[str],
+                           entities: dict) -> tuple[str, str]:
+    """Infer note type and domain from metadata.
+
+    Returns (type_value, domain_value). Either may be empty string if not confidently determined.
+    """
+    nb_lower = notebook.lower() if notebook else ''
+    sec_lower = section.lower() if section else ''
+    tags_set = set(t.lower() for t in tags) if tags else set()
+
+    # --- Type inference ---
+    note_type = 'knowledge'
+
+    if 'meeting' in nb_lower or 'meeting' in sec_lower:
+        note_type = 'meeting'
+    elif nb_lower == 'projects' or nb_lower == 'project_lead':
+        note_type = 'project-note'
+    elif nb_lower == 'conferences':
+        note_type = 'knowledge'
+    elif nb_lower == 'x-omics snippets':
+        note_type = 'knowledge'
+    elif nb_lower == 'concepts':
+        note_type = 'knowledge'
+    elif nb_lower == 'assignment':
+        note_type = 'project-note'
+
+    # --- Domain inference ---
+    # Priority: explicit tag signals > entity signals > notebook/section signals
+    domain = ''
+
+    # Tag-based signals (strongest)
+    adc_tags = {'adc-development', 'antibody-drug-conjugates', 'adc-design',
+                'adc-optimization', 'adc-payloads', 'adc-targets', 'adc-therapy'}
+    onco_tags = {'immuno-oncology', 'immunotherapy', 'checkpoint-inhibitors',
+                 'tumor-microenvironment', 'car-t', 'immune-evasion', 'oncology'}
+    comp_bio_tags = {'computational-oncology', 'bioinformatics-pipeline', 'scrna-seq',
+                     'single-cell-genomics', 'bulk-rna-seq', 'computational-biology',
+                     'genomics', 'transcriptomics', 'wes', 'variant-calling'}
+    ai_tags = {'machine-learning', 'deep-learning', 'artificial-intelligence',
+               'neural-networks', 'ai-tools', 'ai-applications'}
+    drug_disc_tags = {'drug-discovery', 'target-identification', 'virtual-screening',
+                      'small-molecule', 'hit-identification', 'lead-optimization'}
+
+    if tags_set & adc_tags:
+        domain = 'adcs'
+    elif tags_set & comp_bio_tags:
+        domain = 'computational-biology'
+    elif tags_set & ai_tags:
+        domain = 'ai-ml'
+    elif tags_set & drug_disc_tags:
+        domain = 'drug-discovery'
+    elif tags_set & onco_tags:
+        domain = 'immuno-oncology'
+
+    # Entity-based fallback
+    if not domain:
+        methods = set(m.lower() for m in entities.get('methods', []))
+        adc_methods = {'adc', 'bispecific antibody', 'monoclonal antibody'}
+        comp_methods = {'scrna-seq', 'bulk rna-seq', 'spatial transcriptomics',
+                        'deconvolution', 'clustering', 'differential expression'}
+        ai_methods = {'deep learning', 'machine learning', 'neural network'}
+
+        if methods & adc_methods:
+            domain = 'adcs'
+        elif methods & comp_methods:
+            domain = 'computational-biology'
+        elif methods & ai_methods:
+            domain = 'ai-ml'
+
+    # Section-based fallback
+    if not domain:
+        if 'adc' in sec_lower or 'ic adc' in sec_lower:
+            domain = 'adcs'
+        elif 'omics' in nb_lower or 'pipeline' in sec_lower or 'bioinformatics' in sec_lower:
+            domain = 'computational-biology'
+        elif 'conference' in nb_lower:
+            domain = 'oncology'
+
+    return note_type, domain
+
+
+def _inject_type_domain(markdown: str, note_type: str, domain: str) -> str:
+    """Inject type and domain fields into existing YAML frontmatter."""
+    m = re.match(r'^---\n(.*?\n)---', markdown, re.DOTALL)
+    if not m:
+        return markdown
+
+    fm_text = m.group(1)
+    rest = markdown[m.end():]
+
+    # Don't overwrite if already present
+    has_type = '\ntype:' in fm_text or fm_text.startswith('type:')
+    has_domain = '\ndomain:' in fm_text or fm_text.startswith('domain:')
+
+    if has_type and has_domain:
+        return markdown
+
+    insert_lines = []
+    if not has_type and note_type:
+        insert_lines.append(f'type: {note_type}')
+    if not has_domain and domain:
+        insert_lines.append(f'domain: {domain}')
+
+    if not insert_lines:
+        return markdown
+
+    # Insert after title line (first field)
+    lines = fm_text.split('\n')
+    # Find insertion point: after title or author line
+    insert_idx = 1
+    for i, line in enumerate(lines):
+        if line.startswith('title:') or line.startswith('author:'):
+            insert_idx = i + 1
+            # Skip multi-line values (contributors list etc.)
+            while insert_idx < len(lines) and lines[insert_idx].startswith('  '):
+                insert_idx += 1
+            break
+
+    for j, il in enumerate(insert_lines):
+        lines.insert(insert_idx + j, il)
+
+    return '---\n' + '\n'.join(lines) + '---' + rest
+
+
 def _apply_ai_processing(markdown: str, page_name: str, section_path: str,
                          key: str, state: dict, args) -> str:
     """Run AI tags and/or entity extraction on markdown. Returns enriched markdown.
@@ -2107,6 +2241,23 @@ def _apply_ai_processing(markdown: str, page_name: str, section_path: str,
             markdown = _wikify_entities(markdown, entities_dict, wikify_map, page_name)
             if args.dataview:
                 markdown = _inject_entities(markdown, entities_dict)
+
+    # Infer and inject type + domain from all available signals
+    if args.dataview:
+        import yaml as _yaml
+        _fm_match = re.match(r'^---\n(.*?\n)---', markdown, re.DOTALL)
+        if _fm_match:
+            try:
+                _fm_data = _yaml.safe_load(_fm_match.group(1)) or {}
+            except Exception:
+                _fm_data = {}
+            _notebook = _fm_data.get('notebook', '')
+            _section = _fm_data.get('section', '')
+            _tags = _fm_data.get('tags', [])
+            _entities = _fm_data.get('entities', {}) or {}
+            _note_type, _domain = _infer_type_and_domain(_notebook, _section, _tags, _entities)
+            if _note_type or _domain:
+                markdown = _inject_type_domain(markdown, _note_type, _domain)
 
     return markdown
 
@@ -2571,11 +2722,13 @@ Write-Output "DONE"
         hierarchy_path = temp_dir / 'hierarchy.xml'
         notebooks = parse_hierarchy(hierarchy_path)
 
-        all_pages = collect_all_pages(notebooks, args.notebooks)
+        all_pages = collect_all_pages(notebooks, args.notebooks, args.exclude_notebooks)
         print(f'  Found {len(all_pages)} pages across {len(notebooks)} notebooks.')
 
         if args.notebooks:
             print(f'  Filtered to notebooks: {", ".join(args.notebooks)}')
+        if args.exclude_notebooks:
+            print(f'  Excluded notebooks: {", ".join(args.exclude_notebooks)}')
 
         # Phase 3: Determine and execute actions
         print('\n[Phase 3] Syncing...')
