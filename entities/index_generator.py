@@ -109,8 +109,14 @@ def _build_entity_page(name: str, entity_type: str, mention_count: int,
     elif entity_type == 'compounds':
         compound_info = dicts.compounds.get(name, {})
         if compound_info:
-            for k, v in compound_info.items():
-                lines.append(f'{k}: "{v}"')
+            if compound_info.get('target'):
+                lines.append(f'target: "{compound_info["target"]}"')
+            if compound_info.get('class'):
+                lines.append(f'class: "{compound_info["class"]}"')
+            m_code = next((v.upper() for v in compound_info.get('variants', [])
+                           if v.lower().startswith('m') and v[1:].isdigit()), None)
+            if m_code:
+                lines.append(f'm_code: "{m_code}"')
 
     elif entity_type == 'companies':
         parent = dicts.company_parents.get(name)
@@ -139,12 +145,10 @@ def _build_entity_page(name: str, entity_type: str, mention_count: int,
         compound_info = dicts.compounds.get(name, {})
         if compound_info:
             parts = []
-            if compound_info.get('name'):
-                parts.append(compound_info['name'])
             if compound_info.get('target'):
                 parts.append(f"Target: {compound_info['target']}")
-            if compound_info.get('modality'):
-                parts.append(f"({compound_info['modality']})")
+            if compound_info.get('class'):
+                parts.append(f"({compound_info['class']})")
             if parts:
                 lines.append(f'*{" — ".join(parts)}*')
                 lines.append('')

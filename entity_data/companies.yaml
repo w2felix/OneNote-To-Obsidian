@@ -258,3 +258,163 @@ Max Planck Institute:
     - "max-planck"
     - "max planck institute"
     - mpi
+
+# AI / tech companies
+OpenAI:
+  variants:
+    - openai
+    - "open ai"
+
+Anthropic:
+  variants:
+    - anthropic
+
+Google:
+  variants:
+    - google
+    - "google llc"
+    - "google inc"
+    - "google research"
+
+Alphabet:
+  variants:
+    - alphabet
+    - "alphabet inc"
+
+DeepMind:
+  variants:
+    - deepmind
+    - "google deepmind"
+    - "google deep mind"
+  parent: Google
+
+FutureHouse:
+  variants:
+    - futurehouse
+    - "future house"
+
+xAI:
+  variants:
+    - xai
+    - "x.ai"
+
+Microsoft:
+  variants:
+    - microsoft
+    - "microsoft research"
+    - "microsoft corporation"
+
+Meta:
+  variants:
+    - "meta ai"
+    - "meta platforms"
+    - "meta llama"
+
+NVIDIA:
+  variants:
+    - nvidia
+    - "nvidia corporation"
+    - "nvidia research"
+
+AMD:
+  variants:
+    - "advanced micro devices"
+    - "amd inc"
+
+# AI drug discovery / biotech
+Recursion Pharmaceuticals:
+  variants:
+    - recursion
+    - "recursion pharmaceuticals"
+
+Insilico Medicine:
+  variants:
+    - insilico
+    - "insilico medicine"
+
+BenevolentAI:
+  variants:
+    - benevolentai
+    - "benevolent ai"
+
+Exscientia:
+  variants:
+    - exscientia
+
+Generate Biomedicines:
+  variants:
+    - "generate biomedicines"
+    - "generate:biomedicines"
+
+AbSci:
+  variants:
+    - absci
+
+Isomorphic Labs:
+  variants:
+    - isomorphic
+    - "isomorphic labs"
+  parent: Google
+
+Xaira Therapeutics:
+  variants:
+    - xaira
+    - "xaira therapeutics"
+
+Treeline Biosciences:
+  variants:
+    - treeline
+    - "treeline biosciences"
+
+ImmunoGen:
+  variants:
+    - immunogen
+    - "immunogen inc"
+
+Sutro Biopharma:
+  variants:
+    - sutro
+    - "sutro biopharma"
+
+Mersana Therapeutics:
+  variants:
+    - mersana
+    - "mersana therapeutics"
+
+CytomX Therapeutics:
+  variants:
+    - cytomx
+    - "cytomx therapeutics"
+
+# Genomics / sequencing
+10x Genomics:
+  variants:
+    - "10x genomics"
+    - "10xgenomics"
+
+Oxford Nanopore:
+  variants:
+    - "oxford nanopore"
+    - "oxford nanopore technologies"
+    - ont
+
+Pacific Biosciences:
+  variants:
+    - pacbio
+    - "pacific biosciences"
+
+Thermo Fisher Scientific:
+  variants:
+    - "thermo fisher"
+    - thermofisher
+    - "thermo fisher scientific"
+
+BD Biosciences:
+  variants:
+    - "bd biosciences"
+    - "becton dickinson"
+
+ATCC:
+  variants:
+    - atcc
+    - "american type culture collection"

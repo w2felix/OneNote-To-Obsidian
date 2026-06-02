@@ -250,11 +250,12 @@ def _extract_compounds(text: str, dicts: EntityDictionaries) -> list[EntityMenti
             continue
         seen.add(code)
 
+        canonical = dicts.compound_codes.get(code) or code
         mentions.append(EntityMention(
             text=match.group(0),
-            canonical=code,
+            canonical=canonical,
             entity_type='compound',
-            ontology_id='',
+            ontology_id=code if canonical != code else '',
             confidence=1.0,
         ))
     for match in CHEMLIB_RE.finditer(text):
@@ -486,6 +487,13 @@ def _extract_from_variants(text_lower: str, variants: dict[str, str],
     return mentions
 
 
+def _extract_drugs(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
+    """Extract drug/compound names using curated dictionary."""
+    if not dicts.drug_variants:
+        return []
+    return _extract_from_variants(text.lower(), dicts.drug_variants, 'drug', min_len=3)
+
+
 def _extract_companies(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
     """Extract company names using curated dictionary."""
     if not dicts.company_variants:
@@ -651,7 +659,7 @@ def extract_entities(text: str, dicts: EntityDictionaries | None = None) -> Enti
         compounds=_extract_compounds(text, dicts),
         genes=_extract_genes(text, dicts),
         diseases=_extract_diseases(text, dicts),
-        drugs=[],  # Drugs come from LLM (Tier 2) — no curated drug dictionary
+        drugs=_extract_drugs(text, dicts),
         companies=_extract_companies(text, dicts),
         roles=_extract_roles(text),
         methods=_extract_methods(text, dicts),

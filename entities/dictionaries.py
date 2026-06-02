@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -22,12 +23,18 @@ class EntityDictionaries:
 
     disease_names: dict[str, dict] = field(default_factory=dict)
 
+    # compounds: canonical_name -> {target, class, ...} metadata
     compounds: dict[str, dict] = field(default_factory=dict)
+    # compound_codes: M-code (uppercase) -> canonical_name
+    compound_codes: dict[str, str] = field(default_factory=dict)
 
     # company_variants: variant_name (lowercase) -> canonical_name
     company_variants: dict[str, str] = field(default_factory=dict)
     # company_parents: canonical_name -> parent canonical_name
     company_parents: dict[str, str] = field(default_factory=dict)
+
+    # drug_variants: variant_name (lowercase) -> canonical_name
+    drug_variants: dict[str, str] = field(default_factory=dict)
 
     # method_variants: variant_name (lowercase) -> canonical_name
     method_variants: dict[str, str] = field(default_factory=dict)
@@ -115,10 +122,35 @@ def load_dictionaries() -> EntityDictionaries:
     compounds_path = DATA_DIR / 'internal_compounds.yaml'
     if compounds_path.exists():
         with open(compounds_path, encoding='utf-8') as f:
-            dicts.compounds = yaml.safe_load(f) or {}
-        logger.debug(f"Loaded {len(dicts.compounds)} internal compounds")
+            compounds_data = yaml.safe_load(f) or {}
+        _mcode_re = re.compile(r'^m\d{4}$', re.IGNORECASE)
+        for canonical, entry in compounds_data.items():
+            entry = entry or {}
+            dicts.compounds[canonical] = entry
+            for v in entry.get('variants', []):
+                if _mcode_re.match(v):
+                    dicts.compound_codes[v.upper()] = canonical
+        logger.debug(f"Loaded {len(dicts.compounds)} internal compounds, "
+                     f"{len(dicts.compound_codes)} M-codes")
     else:
         logger.warning(f"Internal compounds file not found: {compounds_path}")
+
+    # Load drugs
+    drugs_path = DATA_DIR / 'drugs.yaml'
+    if drugs_path.exists():
+        with open(drugs_path, encoding='utf-8') as f:
+            drugs_data = yaml.safe_load(f) or {}
+        for canonical, entry in drugs_data.items():
+            dicts.drug_variants[canonical.lower()] = canonical
+            if isinstance(entry, dict):
+                for v in entry.get('variants', []):
+                    dicts.drug_variants[v.lower()] = canonical
+            elif isinstance(entry, list):
+                for v in entry:
+                    dicts.drug_variants[v.lower()] = canonical
+        logger.debug(f"Loaded {len(dicts.drug_variants)} drug name variants")
+    else:
+        logger.warning(f"Drugs file not found: {drugs_path}")
 
     # Load companies
     companies_path = DATA_DIR / 'companies.yaml'

@@ -1,0 +1,777 @@
+# Curated drug / compound dictionary for entity extraction
+# Format:
+#   CanonicalName:
+#     variants: [lowercase variant spellings]
+#     class: Drug class (optional)
+#
+# Internal M-codes (M1234) are handled separately by regex in extractor.py.
+# This file covers approved drugs, investigational compounds, and research tool compounds.
+
+# --- ROCK inhibitors ---
+Y-27632:
+  variants:
+    - y-27632
+    - y27632
+    - "y 27632"
+  class: ROCK inhibitor
+
+Ripasudil:
+  variants:
+    - ripasudil
+    - k-115
+    - k115
+  class: ROCK inhibitor
+
+Fasudil:
+  variants:
+    - fasudil
+    - ha-1077
+    - ha1077
+  class: ROCK inhibitor
+
+Thiazovivin:
+  variants:
+    - thiazovivin
+  class: ROCK inhibitor
+
+# --- ADC drugs ---
+Trastuzumab emtansine:
+  variants:
+    - "trastuzumab emtansine"
+    - t-dm1
+    - tdm1
+    - kadcyla
+    - ado-trastuzumab
+  class: HER2 ADC
+
+Trastuzumab deruxtecan:
+  variants:
+    - "trastuzumab deruxtecan"
+    - t-dxd
+    - tdxd
+    - enhertu
+    - ds-8201
+    - ds8201
+  class: HER2 ADC
+
+Brentuximab vedotin:
+  variants:
+    - "brentuximab vedotin"
+    - sgn-35
+    - adcetris
+  class: CD30 ADC
+
+Enfortumab vedotin:
+  variants:
+    - "enfortumab vedotin"
+    - padcev
+    - asg-22ce
+  class: Nectin-4 ADC
+
+Sacituzumab govitecan:
+  variants:
+    - "sacituzumab govitecan"
+    - trodelvy
+    - immu-132
+  class: TROP2 ADC
+
+Disitamab vedotin:
+  variants:
+    - "disitamab vedotin"
+    - rc48
+    - "rc-48"
+  class: HER2 ADC
+
+Mirvetuximab soravtansine:
+  variants:
+    - "mirvetuximab soravtansine"
+    - elahere
+    - imgn853
+  class: FRα ADC
+
+Patritumab deruxtecan:
+  variants:
+    - "patritumab deruxtecan"
+    - herthena
+    - u3-1402
+  class: HER3 ADC
+
+Datopotamab deruxtecan:
+  variants:
+    - "datopotamab deruxtecan"
+    - dato-dxd
+    - ds-1062
+  class: TROP2 ADC
+
+Ifinatamab deruxtecan:
+  variants:
+    - "ifinatamab deruxtecan"
+    - i-dxd
+    - ds-7300
+  class: B7-H3 ADC
+
+Telisotuzumab vedotin:
+  variants:
+    - "telisotuzumab vedotin"
+    - abbv-399
+    - "c-met adc"
+  class: c-MET ADC
+
+# --- Checkpoint inhibitors ---
+Pembrolizumab:
+  variants:
+    - pembrolizumab
+    - keytruda
+    - mk-3475
+  class: PD-1 inhibitor
+
+Nivolumab:
+  variants:
+    - nivolumab
+    - opdivo
+    - bms-936558
+  class: PD-1 inhibitor
+
+Atezolizumab:
+  variants:
+    - atezolizumab
+    - tecentriq
+    - mpdl3280a
+  class: PD-L1 inhibitor
+
+Durvalumab:
+  variants:
+    - durvalumab
+    - imfinzi
+    - medi4736
+  class: PD-L1 inhibitor
+
+Avelumab:
+  variants:
+    - avelumab
+    - bavencio
+    - msb0010718c
+  class: PD-L1 inhibitor
+
+Ipilimumab:
+  variants:
+    - ipilimumab
+    - yervoy
+    - mdi-010
+  class: CTLA-4 inhibitor
+
+Cemiplimab:
+  variants:
+    - cemiplimab
+    - libtayo
+    - regn2810
+  class: PD-1 inhibitor
+
+Dostarlimab:
+  variants:
+    - dostarlimab
+    - jemperli
+    - tsr-042
+  class: PD-1 inhibitor
+
+Tislelizumab:
+  variants:
+    - tislelizumab
+    - bgb-a317
+  class: PD-1 inhibitor
+
+Sintilimab:
+  variants:
+    - sintilimab
+    - tyvyt
+    - ibi301
+  class: PD-1 inhibitor
+
+# --- VEGFR / angiogenesis inhibitors ---
+Bevacizumab:
+  variants:
+    - bevacizumab
+    - avastin
+  class: VEGF-A antibody
+
+Sunitinib:
+  variants:
+    - sunitinib
+    - sutent
+    - su11248
+  class: VEGFR inhibitor
+
+Pazopanib:
+  variants:
+    - pazopanib
+    - votrient
+  class: VEGFR inhibitor
+
+Cabozantinib:
+  variants:
+    - cabozantinib
+    - cabometyx
+    - xl184
+  class: VEGFR/MET/AXL inhibitor
+
+Axitinib:
+  variants:
+    - axitinib
+    - inlyta
+    - ag-013736
+  class: VEGFR inhibitor
+
+Lenvatinib:
+  variants:
+    - lenvatinib
+    - lenvima
+    - e7080
+  class: VEGFR inhibitor
+
+# --- EGFR inhibitors ---
+Erlotinib:
+  variants:
+    - erlotinib
+    - tarceva
+    - osi-774
+  class: EGFR inhibitor
+
+Gefitinib:
+  variants:
+    - gefitinib
+    - iressa
+    - zd1839
+  class: EGFR inhibitor
+
+Afatinib:
+  variants:
+    - afatinib
+    - gilotrif
+    - bibw2992
+  class: EGFR inhibitor
+
+Osimertinib:
+  variants:
+    - osimertinib
+    - tagrisso
+    - azd9291
+  class: EGFR T790M inhibitor
+
+Cetuximab:
+  variants:
+    - cetuximab
+    - erbitux
+    - c225
+  class: EGFR antibody
+
+Panitumumab:
+  variants:
+    - panitumumab
+    - vectibix
+  class: EGFR antibody
+
+# --- HER2 inhibitors ---
+Trastuzumab:
+  variants:
+    - trastuzumab
+    - herceptin
+    - "anti-her2"
+  class: HER2 antibody
+
+Pertuzumab:
+  variants:
+    - pertuzumab
+    - perjeta
+    - 2c4
+  class: HER2 antibody
+
+Lapatinib:
+  variants:
+    - lapatinib
+    - tykerb
+    - gw572016
+  class: HER2/EGFR inhibitor
+
+Neratinib:
+  variants:
+    - neratinib
+    - nerlynx
+    - hki-272
+  class: HER2/EGFR inhibitor
+
+Tucatinib:
+  variants:
+    - tucatinib
+    - tukysa
+    - ont-380
+  class: HER2 inhibitor
+
+# --- PARP inhibitors ---
+Olaparib:
+  variants:
+    - olaparib
+    - lynparza
+    - azd2281
+  class: PARP inhibitor
+
+Niraparib:
+  variants:
+    - niraparib
+    - zejula
+    - mk-4827
+  class: PARP inhibitor
+
+Rucaparib:
+  variants:
+    - rucaparib
+    - rubraca
+    - ag-014699
+  class: PARP inhibitor
+
+Talazoparib:
+  variants:
+    - talazoparib
+    - talzenna
+    - bmn-673
+  class: PARP inhibitor
+
+# --- CDK4/6 inhibitors ---
+Palbociclib:
+  variants:
+    - palbociclib
+    - ibrance
+    - pd-0332991
+  class: CDK4/6 inhibitor
+
+Ribociclib:
+  variants:
+    - ribociclib
+    - kisqali
+    - lee011
+  class: CDK4/6 inhibitor
+
+Abemaciclib:
+  variants:
+    - abemaciclib
+    - verzenio
+    - ly2835219
+  class: CDK4/6 inhibitor
+
+# --- MEK inhibitors ---
+Trametinib:
+  variants:
+    - trametinib
+    - mekinist
+    - gsk1120212
+  class: MEK inhibitor
+
+Binimetinib:
+  variants:
+    - binimetinib
+    - mektovi
+    - mek162
+  class: MEK inhibitor
+
+Cobimetinib:
+  variants:
+    - cobimetinib
+    - cotellic
+    - gdc-0973
+  class: MEK inhibitor
+
+Selumetinib:
+  variants:
+    - selumetinib
+    - koselugo
+    - azd6244
+  class: MEK inhibitor
+
+# --- BRAF inhibitors ---
+Vemurafenib:
+  variants:
+    - vemurafenib
+    - zelboraf
+    - pli-4032
+  class: BRAF inhibitor
+
+Dabrafenib:
+  variants:
+    - dabrafenib
+    - tafinlar
+    - gskg2118436
+  class: BRAF inhibitor
+
+# --- KRAS inhibitors ---
+Sotorasib:
+  variants:
+    - sotorasib
+    - lumakras
+    - amg-510
+  class: KRAS G12C inhibitor
+
+Adagrasib:
+  variants:
+    - adagrasib
+    - krazati
+    - mrtx849
+  class: KRAS G12C inhibitor
+
+# --- ALK inhibitors ---
+Crizotinib:
+  variants:
+    - crizotinib
+    - xalkori
+    - pf-02341066
+  class: ALK/MET inhibitor
+
+Alectinib:
+  variants:
+    - alectinib
+    - alecensa
+    - af-802
+  class: ALK inhibitor
+
+Lorlatinib:
+  variants:
+    - lorlatinib
+    - lorbrena
+    - pf-06463922
+  class: ALK inhibitor
+
+Brigatinib:
+  variants:
+    - brigatinib
+    - alunbrig
+    - ap26113
+  class: ALK inhibitor
+
+# --- BTK inhibitors ---
+Ibrutinib:
+  variants:
+    - ibrutinib
+    - imbruvica
+    - pci-32765
+  class: BTK inhibitor
+
+Acalabrutinib:
+  variants:
+    - acalabrutinib
+    - calquence
+    - acp-196
+  class: BTK inhibitor
+
+Zanubrutinib:
+  variants:
+    - zanubrutinib
+    - brukinsa
+    - bgb-3111
+  class: BTK inhibitor
+
+# --- PI3K / mTOR inhibitors ---
+Alpelisib:
+  variants:
+    - alpelisib
+    - piqray
+    - byl719
+  class: PI3Kα inhibitor
+
+Idelalisib:
+  variants:
+    - idelalisib
+    - zydelig
+    - cal-101
+  class: PI3Kδ inhibitor
+
+Everolimus:
+  variants:
+    - everolimus
+    - afinitor
+    - rad001
+  class: mTOR inhibitor
+
+Temsirolimus:
+  variants:
+    - temsirolimus
+    - torisel
+    - cci-779
+  class: mTOR inhibitor
+
+Sirolimus:
+  variants:
+    - sirolimus
+    - rapamycin
+    - rapa
+    - rapamune
+  class: mTOR inhibitor
+
+# --- BCL-2 inhibitors ---
+Venetoclax:
+  variants:
+    - venetoclax
+    - venclexta
+    - abt-199
+    - gdc-0199
+  class: BCL-2 inhibitor
+
+# --- HDAC inhibitors ---
+Vorinostat:
+  variants:
+    - vorinostat
+    - zolinza
+    - saha
+    - suberoylanilide
+  class: HDAC inhibitor
+
+Romidepsin:
+  variants:
+    - romidepsin
+    - istodax
+    - fk228
+  class: HDAC inhibitor
+
+Panobinostat:
+  variants:
+    - panobinostat
+    - farydak
+    - lbh589
+  class: HDAC inhibitor
+
+# --- Taxanes ---
+Paclitaxel:
+  variants:
+    - paclitaxel
+    - taxol
+    - abraxane
+    - nab-paclitaxel
+  class: Taxane
+
+Docetaxel:
+  variants:
+    - docetaxel
+    - taxotere
+  class: Taxane
+
+Cabazitaxel:
+  variants:
+    - cabazitaxel
+    - jevtana
+    - xrp6258
+  class: Taxane
+
+# --- Platinum compounds ---
+Cisplatin:
+  variants:
+    - cisplatin
+    - "cis-platinum"
+    - platinol
+  class: Platinum compound
+
+Carboplatin:
+  variants:
+    - carboplatin
+    - paraplatin
+  class: Platinum compound
+
+Oxaliplatin:
+  variants:
+    - oxaliplatin
+    - eloxatin
+  class: Platinum compound
+
+# --- Topoisomerase inhibitors ---
+Irinotecan:
+  variants:
+    - irinotecan
+    - camptosar
+    - cpt-11
+  class: Topoisomerase I inhibitor
+
+Topotecan:
+  variants:
+    - topotecan
+    - hycamtin
+  class: Topoisomerase I inhibitor
+
+Etoposide:
+  variants:
+    - etoposide
+    - vepesid
+    - vp-16
+  class: Topoisomerase II inhibitor
+
+# --- Anthracyclines ---
+Doxorubicin:
+  variants:
+    - doxorubicin
+    - adriamycin
+    - hydroxydaunorubicin
+  class: Anthracycline
+
+Epirubicin:
+  variants:
+    - epirubicin
+    - ellence
+    - pharmorubicin
+  class: Anthracycline
+
+# --- Antimetabolites ---
+Gemcitabine:
+  variants:
+    - gemcitabine
+    - gemzar
+    - dfdc
+  class: Nucleoside analogue
+
+5-Fluorouracil:
+  variants:
+    - "5-fluorouracil"
+    - 5fu
+    - "5-fu"
+    - fluorouracil
+  class: Pyrimidine analogue
+
+Capecitabine:
+  variants:
+    - capecitabine
+    - xeloda
+  class: Pyrimidine analogue
+
+Methotrexate:
+  variants:
+    - methotrexate
+    - mtx
+    - rheumatrex
+  class: Antifolate
+
+Pemetrexed:
+  variants:
+    - pemetrexed
+    - alimta
+  class: Antifolate
+
+# --- Steroids / supportive ---
+Dexamethasone:
+  variants:
+    - dexamethasone
+    - dex
+    - decadron
+  class: Glucocorticoid
+
+Prednisone:
+  variants:
+    - prednisone
+    - deltasone
+  class: Glucocorticoid
+
+# --- Research / tool compounds ---
+Staurosporine:
+  variants:
+    - staurosporine
+    - sfk
+  class: Broad kinase inhibitor
+
+Bafilomycin A1:
+  variants:
+    - "bafilomycin a1"
+    - bafilomycin
+    - bafa1
+    - baf-a1
+  class: V-ATPase inhibitor
+
+Rapamycin:
+  variants:
+    - rapamycin
+  class: mTOR inhibitor
+
+KL001:
+  variants:
+    - kl001
+    - kl-001
+  class: CRY stabilizer
+
+# --- Bispecific antibodies / T-cell engagers ---
+Blinatumomab:
+  variants:
+    - blinatumomab
+    - blincyto
+    - mt103
+  class: CD3xCD19 BiTE
+
+Tebentafusp:
+  variants:
+    - tebentafusp
+    - kimmtrak
+    - imct-core
+  class: TCR bispecific
+
+Glofitamab:
+  variants:
+    - glofitamab
+    - columvi
+    - rg6026
+  class: CD20xCD3 bispecific
+
+Epcoritamab:
+  variants:
+    - epcoritamab
+    - epkinly
+    - genmab-dxd
+  class: CD20xCD3 bispecific
+
+Mosunetuzumab:
+  variants:
+    - mosunetuzumab
+    - lunsumio
+    - rg7828
+  class: CD20xCD3 bispecific
+
+# --- mTOR / other targeted ---
+Imatinib:
+  variants:
+    - imatinib
+    - gleevec
+    - glivec
+    - sti571
+  class: BCR-ABL inhibitor
+
+Dasatinib:
+  variants:
+    - dasatinib
+    - sprycel
+    - bms-354825
+  class: BCR-ABL/Src inhibitor
+
+Nilotinib:
+  variants:
+    - nilotinib
+    - tasigna
+    - amn107
+  class: BCR-ABL inhibitor
+
+Ponatinib:
+  variants:
+    - ponatinib
+    - iclusig
+    - ap24534
+  class: BCR-ABL inhibitor
+
+# --- Immunomodulators ---
+Lenalidomide:
+  variants:
+    - lenalidomide
+    - revlimid
+    - cc-5013
+  class: IMiD
+
+Thalidomide:
+  variants:
+    - thalidomide
+    - thalomid
+  class: IMiD
+
+Pomalidomide:
+  variants:
+    - pomalidomide
+    - pomalyst
+    - cc-4047
+  class: IMiD
