@@ -23,3 +23,9 @@ entity_data/hgnc_complete_set.tsv
 entity_data/mondo.json
 entity_data/hgnc_genes.json
 entity_data/mondo_diseases.json
+
+# Internal compound registry (confidential — local only)
+entity_data/internal_compounds.yaml
+
+# Claude Code tooling
+.claude/
