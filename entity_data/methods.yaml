@@ -1,263 +1,223 @@
-# Experimental methods, technologies, and computational approaches
-# Format: canonical_name: [list of variant spellings (lowercase)]
-
-# Sequencing methods
-ChIP-seq:
-  - chip-seq
-  - chipseq
-  - "chip seq"
-
-CUT&Tag:
-  - "cut&tag"
-  - "cut and tag"
-  - cuttag
-
-ATAC-seq:
-  - atac-seq
-  - atacseq
-  - "atac seq"
-
-scRNA-seq:
-  - scrna-seq
-  - scrnaseq
-  - "single-cell rna-seq"
-  - "single cell rna-seq"
-  - "single cell rna seq"
-
-scATAC-seq:
-  - scatac-seq
-  - scatacseq
-  - "single-cell atac-seq"
-
-Spatial Transcriptomics:
-  - "spatial transcriptomics"
-  - "spatial transcriptomic"
-
-RNA-seq:
-  - rna-seq
-  - rnaseq
-  - "rna seq"
-  - "rna sequencing"
-
-NGS:
-  - ngs
-  - "next-generation sequencing"
-  - "next generation sequencing"
-
-WGS:
-  - wgs
-  - "whole genome sequencing"
-
-WES:
-  - wes
-  - "whole exome sequencing"
-
-Bulk RNA-seq:
-  - "bulk rna-seq"
-  - "bulk rnaseq"
-  - "bulk rna seq"
-
-SCTransform:
-  - sctransform
-  - sct
-
-# Gene editing & screens
-CRISPR:
-  - crispr
-  - "crispr-cas9"
-  - crispr/cas9
-
-Perturb-seq:
-  - perturb-seq
-  - perturbseq
-
-CRISPR screen:
-  - "crispr screen"
-  - "crispr screens"
-
-# Computational methods
-Deep Learning:
-  - "deep learning"
-
-Machine Learning:
-  - "machine learning"
-
-Knowledge Graph:
-  - "knowledge graph"
-  - "knowledge graphs"
-
-Deconvolution:
-  - deconvolution
-
-Clustering:
-  - clustering
-
-Survival Analysis:
-  - "survival analysis"
-
-Differential Expression:
-  - "differential expression"
-  - "differential gene expression"
-
-# Imaging & staining
-IHC:
-  - ihc
-  - immunohistochemistry
-
-IF:
-  - "immunofluorescence"
-
-H&E:
-  - "h&e"
-  - "h&e staining"
-  - "hematoxylin and eosin"
-
-Flow Cytometry:
-  - "flow cytometry"
-  - facs
-
-Multiplex Imaging:
-  - "multiplex imaging"
-  - "multiplex immunofluorescence"
-
-# Protein methods
-Mass Spectrometry:
-  - "mass spectrometry"
-  - "mass spec"
-
-Western Blot:
-  - "western blot"
-  - "western blotting"
-
-# Multi-omics
-Multi-omics:
-  - multi-omics
-  - multiomics
-  - "multi omics"
-
-Proteomics:
-  - proteomics
-
-Metabolomics:
-  - metabolomics
-
-# Data types & assays
-PDX:
-  - pdx
-  - "patient-derived xenograft"
-
-Organoid:
-  - organoid
-  - organoids
-
-CiteSeq:
-  - citeseq
-  - cite-seq
-  - "cite seq"
-
-V(D)J:
-  - "v(d)j"
-  - vdj
-
-# Drug modalities & therapeutic platforms
 ADC:
-  - adc
-  - adcs
-  - "antibody-drug conjugate"
-  - "antibody drug conjugate"
-  - "antibody-drug conjugates"
-  - "antibody drug conjugates"
-
-PROTAC:
-  - protac
-  - protacs
-
-Molecular Glue:
-  - "molecular glue"
-  - "molecular glues"
-
-NCE:
-  - nce
-  - "new chemical entity"
-
-NBE:
-  - nbe
-  - "new biological entity"
-
-Bispecific Antibody:
-  - "bispecific antibody"
-  - "bispecific antibodies"
-  - bispecific
-  - bispecifics
-
-CAR-T:
-  - car-t
-  - "car-t cell"
-  - "car-t cells"
-  - "chimeric antigen receptor"
-
-siRNA:
-  - sirna
-  - "small interfering rna"
-
+- adc
+- adcs
+- antibody-drug conjugate
+- antibody drug conjugate
+- antibody-drug conjugates
+- antibody drug conjugates
+ADC Internalization:
+  variants:
+  - adc internalization
+  - antigen internalization
+  - receptor internalization
+  - internalization capacity
+  - internalization rate
+  - endocytosis of adc
+ADC Resistance Mechanisms:
+  variants:
+  - adc resistance mechanisms
+  - adc resistance mechanism
+  - adc drug resistance
+  - resistance mechanism
+  - resistance mechanisms
+  - acquired resistance
+  - primary resistance
 ASO:
-  - aso
-  - "antisense oligonucleotide"
-  - "antisense oligonucleotides"
-
-mRNA Therapy:
-  - "mrna therapy"
-  - "mrna therapeutic"
-  - "mrna therapeutics"
-
-Degrader:
-  - degrader
-  - degraders
-
+- aso
+- antisense oligonucleotide
+- antisense oligonucleotides
+ATAC-seq:
+- atac-seq
+- atacseq
+- atac seq
+Bispecific Antibody:
+- bispecific antibody
+- bispecific antibodies
+- bispecific
+- bispecifics
+Bulk RNA-seq:
+- bulk rna-seq
+- bulk rnaseq
+- bulk rna seq
+Bystander Effect:
+  variants:
+  - bystander effect
+  - bystander killing
+  - bystander activity
+  - bystander cytotoxicity
+CAR-T:
+- car-t
+- car-t cell
+- car-t cells
+- chimeric antigen receptor
+CRISPR:
+- crispr
+- crispr-cas9
+- crispr/cas9
+CRISPR screen:
+- crispr screen
+- crispr screens
+CUT&Tag:
+- cut&tag
+- cut and tag
+- cuttag
+ChIP-seq:
+- chip-seq
+- chipseq
+- chip seq
 Checkpoint Inhibitor:
-  - "checkpoint inhibitor"
-  - "checkpoint inhibitors"
-  - "immune checkpoint inhibitor"
-
-Monoclonal Antibody:
-  - "monoclonal antibody"
-  - "monoclonal antibodies"
-  - mab
-  - mabs
-
-# Drug development pipeline phases / decision points
+- checkpoint inhibitor
+- checkpoint inhibitors
+- immune checkpoint inhibitor
+CiteSeq:
+- citeseq
+- cite-seq
+- cite seq
+Clustering:
+- clustering
 Concept Phase:
-  - "concept phase"
-  - "concept stage"
-
-DPHD:
-  - dphd
-  - "decision point hit to drug"
-
-DPHO:
-  - dpho
-  - "decision point hit to optimization"
-
-DPLO:
-  - dplo
-  - "decision point lead optimization"
-
-DPED:
-  - dped
-  - "decision point early development"
-
+- concept phase
+- concept stage
 DP0:
-  - dp0
-  - "decision point 0"
-
+- dp0
+- decision point 0
 DP1:
-  - dp1
-  - "decision point 1"
-
+- dp1
+- decision point 1
 DP2:
-  - dp2
-  - "decision point 2"
-
+- dp2
+- decision point 2
 DP3:
-  - dp3
-  - "decision point 3"
+- dp3
+- decision point 3
+DPED:
+- dped
+- decision point early development
+DPHD:
+- dphd
+- decision point hit to drug
+DPHO:
+- dpho
+- decision point hit to optimization
+DPLO:
+- dplo
+- decision point lead optimization
+Deconvolution:
+- deconvolution
+Deep Learning:
+- deep learning
+Degrader:
+- degrader
+- degraders
+Differential Expression:
+- differential expression
+- differential gene expression
+Drug-to-Antibody Ratio:
+  variants:
+  - drug-to-antibody ratio
+  - dar
+  - drug to antibody ratio
+  - drug:antibody ratio
+Flow Cytometry:
+- flow cytometry
+- facs
+H&E:
+- h&e
+- h&e staining
+- hematoxylin and eosin
+IF:
+- immunofluorescence
+IHC:
+- ihc
+- immunohistochemistry
+Knowledge Graph:
+- knowledge graph
+- knowledge graphs
+Machine Learning:
+- machine learning
+Mass Spectrometry:
+- mass spectrometry
+- mass spec
+Metabolomics:
+- metabolomics
+Molecular Glue:
+- molecular glue
+- molecular glues
+Monoclonal Antibody:
+- monoclonal antibody
+- monoclonal antibodies
+- mab
+- mabs
+Multi-omics:
+- multi-omics
+- multiomics
+- multi omics
+Multiplex Imaging:
+- multiplex imaging
+- multiplex immunofluorescence
+NBE:
+- nbe
+- new biological entity
+NCE:
+- nce
+- new chemical entity
+NGS:
+- ngs
+- next-generation sequencing
+- next generation sequencing
+Organoid:
+- organoid
+- organoids
+PDX:
+- pdx
+- patient-derived xenograft
+PROTAC:
+- protac
+- protacs
+Perturb-seq:
+- perturb-seq
+- perturbseq
+Proteomics:
+- proteomics
+RNA-seq:
+- rna-seq
+- rnaseq
+- rna seq
+- rna sequencing
+SCTransform:
+- sctransform
+- sct
+Spatial Transcriptomics:
+- spatial transcriptomics
+- spatial transcriptomic
+Survival Analysis:
+- survival analysis
+V(D)J:
+- v(d)j
+- vdj
+WES:
+- wes
+- whole exome sequencing
+WGS:
+- wgs
+- whole genome sequencing
+Western Blot:
+- western blot
+- western blotting
+mRNA Therapy:
+- mrna therapy
+- mrna therapeutic
+- mrna therapeutics
+scATAC-seq:
+- scatac-seq
+- scatacseq
+- single-cell atac-seq
+scRNA-seq:
+- scrna-seq
+- scrnaseq
+- single-cell rna-seq
+- single cell rna-seq
+- single cell rna seq
+siRNA:
+- sirna
+- small interfering rna

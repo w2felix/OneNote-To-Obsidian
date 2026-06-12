@@ -775,3 +775,276 @@ Pomalidomide:
     - pomalyst
     - cc-4047
   class: IMiD
+
+Aducanumab:
+  variants:
+    - aducanumab
+  class: monoclonal antibody
+
+Elevidys:
+  variants:
+    - elevidys
+  class: gene therapy
+
+Lecanemab:
+  variants:
+    - lecanemab
+  class: monoclonal antibody
+
+OCA:
+  variants:
+    - oca
+    - obeticholic acid
+  class: FXR agonist
+
+Torcetrapib:
+  variants:
+    - torcetrapib
+  class: CETP inhibitor
+
+Zynteglo:
+  variants:
+    - zynteglo
+  class: gene therapy
+
+Gemtuzumab ozogamicin:
+  variants:
+    - gemtuzumab ozogamicin
+  class: ADC
+
+Pivekimab sunirine:
+  variants:
+    - pivekimab sunirine
+  class: ADC
+
+Inotuzumab ozogamicin:
+  variants:
+    - inotuzumab ozogamicin
+  class: ADC
+
+Loncastuximab tesirine:
+  variants:
+    - loncastuximab tesirine
+  class: ADC
+
+Polatuzumab vedotin:
+  variants:
+    - polatuzumab vedotin
+  class: ADC
+
+Belantamab mafodotin:
+  variants:
+    - belantamab mafodotin
+  class: ADC
+
+Raludotatug deruxtecan:
+  variants:
+    - raludotatug deruxtecan
+    - mk-5909
+  class: ADC
+
+Garetatug rezetecan:
+  variants:
+    - garetatug rezetecan
+  class: ADC
+
+Zilovertamab vedotin:
+  variants:
+    - zilovertamab vedotin
+    - mk-2140
+  class: ADC
+
+DP303c/trastuzumab envedotin:
+  variants:
+    - dp303c/trastuzumab envedotin
+    - dp303c
+    - trastuzumab envedotin
+  class: ADC
+
+XMT-2056:
+  variants:
+    - xmt-2056
+    - xmt2056
+  class: ISAC, HER2/STING agonist conjugate
+
+BDC-4182:
+  variants:
+    - bdc-4182
+    - bdc4182
+  class: ISAC, claudin-18.2/TLR-7/8 agonist conjugate
+
+TAC-001:
+  variants:
+    - tac-001
+    - tac001
+  class: ISAC, CD22/TLR-9 agonist conjugate
+
+ORM-6151:
+  variants:
+    - orm-6151
+    - orm6151
+  class: DAC, CD33/GSPT1 degrader conjugate
+
+IBI3020:
+  variants:
+    - ibi3020
+  class: Dual-payload ADC, CEACAM5-directed
+
+KH815:
+  variants:
+    - kh815
+  class: Dual-payload ADC, TROP-2-directed, Top1i + RNA Pol II inhibitor
+
+DS-6000A:
+  variants:
+    - ds-6000a
+    - ds6000a
+    - mk-5909
+  class: ADC, cadherin-6-directed
+
+DS-7300a:
+  variants:
+    - ds-7300a
+    - ds7300a
+  class: ADC, B7-H3-directed
+
+VLS-101:
+  variants:
+    - vls-101
+    - vls101
+    - mk-2140
+  class: ADC, ROR1-directed
+
+Izalontamab brengitecan:
+  variants:
+    - izalontamab brengitecan
+  class: Bispecific ADC, EGFR/HER3-directed
+
+YL242:
+  variants:
+    - yl242
+    - yl-242
+  class: Topoisomerase I inhibitor ADC
+
+TGW101:
+  variants:
+    - tgw101
+    - tgw-101
+  class: Bioorthogonal click-to-release ADC
+
+Datroway:
+  variants:
+    - datroway
+    - datopotamab deruxtecan
+  class: HER2-directed ADC, Top1 inhibitor
+
+Ziihera:
+  variants:
+    - ziihera
+    - zanidatamab
+  class: HER2 bispecific antibody
+
+JSKN003:
+  variants:
+    - jskn003
+  class: HER2xHER2 biparatopic bsADC, Top1 inhibitor
+
+Iza-bren:
+  variants:
+    - iza-bren
+    - izalontamab brengitecan
+  class: HER3xEGFR bsADC, exatecan-derived Top1 inhibitor
+
+IBI3014:
+  variants:
+    - ibi3014
+  class: Trop2xPD-L1 bsADC
+
+SIM0610:
+  variants:
+    - sim0610
+  class: EGFRxcMet bsADC
+
+QLS5316:
+  variants:
+    - qls5316
+  class: EGFRxcMet bsADC
+
+Rybrevant:
+  variants:
+    - rybrevant
+    - amivantamab
+  class: EGFRxcMet bispecific antibody
+
+CBB-120:
+  variants:
+    - cbb-120
+  class: Trop2-directed dual-payload ADC, exatecan Top1 inhibitor + ATR inhibitor
+
+SN-38:
+  variants:
+    - sn-38
+    - sn38
+  class: Topoisomerase I inhibitor
+
+CL2A:
+  variants:
+    - cl2a
+  class: Hydrolysable linker
+
+CL2E:
+  variants:
+    - cl2e
+  class: Enzyme-cleavable linker
+
+hRS7:
+  variants:
+    - hrs7
+  class: Anti-Trop-2 antibody
+
+AlexaFluor680:
+  variants:
+    - alexafluor680
+    - af680
+  class: Fluorescent dye
+
+Hoechst 33342:
+  variants:
+    - hoechst 33342
+  class: Nuclear counterstain dye
+
+AlexaFluor488:
+  variants:
+    - alexafluor488
+    - af488
+  class: Fluorescent dye
+
+ARX788:
+  variants:
+    - arx788
+  class: HER2-targeting ADC, non-cleavable linker
+
+T-DXd2:
+  variants:
+    - t-dxd2
+  class: HER2-targeting ADC, hydrophilic payload variant
+
+BL-B01D1:
+  variants:
+    - bl-b01d1
+  class: Bispecific ADC, anti-EGFR/HER3
+
+Ed9:
+  variants:
+    - ed9
+  class: Camptothecin derivative, payload
+
+T-Ved9:
+  variants:
+    - t-ved9
+  class: ADC with Ed9 payload
+
+SYD985:
+  variants:
+    - syd985
+  class: Duocarmycin-containing ADC

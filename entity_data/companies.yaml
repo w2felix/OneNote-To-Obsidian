@@ -1,420 +1,414 @@
-# Pharma/biotech/diagnostics companies for Tier 1 entity extraction
-# Format:
-#   canonical_name:
-#     variants: [list of variant spellings (lowercase)]
-#     parent: ParentCompany  (optional)
-
-Merck:
-  variants:
-    - merck
-    - "merck kgaa"
-    - merckgroup
-
-Serono:
-  variants:
-    - serono
-    - "emd serono"
-    - "merck serono"
-  parent: Merck
-
-Sigma-Aldrich:
-  variants:
-    - sigma-aldrich
-    - "sigma aldrich"
-    - sigmaaldrich
-  parent: Merck
-
-MilliporeSigma:
-  variants:
-    - milliporesigma
-    - millipore
-  parent: Merck
-
-Tempus:
-  variants:
-    - tempus
-    - "tempus ai"
-    - "tempus labs"
-
-Caris:
-  variants:
-    - caris
-    - "caris life sciences"
-
-Roche:
-  variants:
-    - roche
-    - "f. hoffmann-la roche"
-
-Genentech:
-  variants:
-    - genentech
-  parent: Roche
-
-AstraZeneca:
-  variants:
-    - astrazeneca
-    - "astra zeneca"
-
-MedImmune:
-  variants:
-    - medimmune
-  parent: AstraZeneca
-
-Novartis:
-  variants:
-    - novartis
-    - "novartis pharma"
-
-Pfizer:
-  variants:
-    - pfizer
-
-Bristol-Myers Squibb:
-  variants:
-    - "bristol-myers squibb"
-    - "bristol myers squibb"
-    - bms
-
-Celgene:
-  variants:
-    - celgene
-  parent: Bristol-Myers Squibb
-
-Eli Lilly:
-  variants:
-    - "eli lilly"
-    - lilly
-
-Johnson & Johnson:
-  variants:
-    - "johnson & johnson"
-    - "johnson and johnson"
-
-Janssen:
-  variants:
-    - janssen
-    - "janssen pharmaceuticals"
-  parent: Johnson & Johnson
-
-Sanofi:
-  variants:
-    - sanofi
-    - "sanofi aventis"
-
-Regeneron:
-  variants:
-    - regeneron
-
-Amgen:
-  variants:
-    - amgen
-
-Gilead:
-  variants:
-    - gilead
-    - "gilead sciences"
-
-AbbVie:
-  variants:
-    - abbvie
-
-Daiichi Sankyo:
-  variants:
-    - "daiichi sankyo"
-    - daiichi
-
-Seagen:
-  variants:
-    - seagen
-  parent: Pfizer
-
-Takeda:
-  variants:
-    - takeda
-
-Bayer:
-  variants:
-    - bayer
-    - "bayer pharma"
-
-Boehringer Ingelheim:
-  variants:
-    - "boehringer ingelheim"
-    - boehringer
-
-GSK:
-  variants:
-    - gsk
-    - glaxosmithkline
-    - "glaxo smithkline"
-
-Moderna:
-  variants:
-    - moderna
-
-BioNTech:
-  variants:
-    - biontech
-
-Illumina:
-  variants:
-    - illumina
-
-Foundation Medicine:
-  variants:
-    - "foundation medicine"
-    - foundationone
-  parent: Roche
-
-Guardant Health:
-  variants:
-    - "guardant health"
-    - guardant
-
-Myriad Genetics:
-  variants:
-    - "myriad genetics"
-    - myriad
-
-NeoGenomics:
-  variants:
-    - neogenomics
-
-Ventana:
-  variants:
-    - ventana
-    - "ventana medical systems"
-  parent: Roche
-
-Agilent:
-  variants:
-    - agilent
-    - "agilent technologies"
-
 10x Genomics:
   variants:
-    - "10x genomics"
-
-Incyte:
-  variants:
-    - incyte
-
-Springworks:
-  variants:
-    - springworks
-    - "springworks therapeutics"
-
-Mirati:
-  variants:
-    - mirati
-    - "mirati therapeutics"
-
-Genome & Company:
-  variants:
-    - "genome & company"
-    - "genome and company"
-
-GenomeOncology:
-  variants:
-    - genomeoncology
-    - "genome oncology"
-
-Tacylix:
-  variants:
-    - tacylix
-
-Memorial Sloan Kettering Cancer Center:
-  variants:
-    - "memorial sloan kettering"
-    - mskcc
-    - "sloan kettering"
-
-Sarah Cannon Research Institute:
-  variants:
-    - "sarah cannon research institute"
-    - "sarah cannon"
-
-DKFZ:
-  variants:
-    - dkfz
-    - "deutsches krebsforschungszentrum"
-    - "german cancer research center"
-
-EMBL:
-  variants:
-    - embl
-    - "european molecular biology laboratory"
-
-MFPL:
-  variants:
-    - mfpl
-    - "max f. perutz laboratories"
-    - "max perutz labs"
-
-Max Planck Institute:
-  variants:
-    - "max planck"
-    - "max-planck"
-    - "max planck institute"
-    - mpi
-
-# AI / tech companies
-OpenAI:
-  variants:
-    - openai
-    - "open ai"
-
-Anthropic:
-  variants:
-    - anthropic
-
-Google:
-  variants:
-    - google
-    - "google llc"
-    - "google inc"
-    - "google research"
-
-Alphabet:
-  variants:
-    - alphabet
-    - "alphabet inc"
-
-DeepMind:
-  variants:
-    - deepmind
-    - "google deepmind"
-    - "google deep mind"
-  parent: Google
-
-FutureHouse:
-  variants:
-    - futurehouse
-    - "future house"
-
-xAI:
-  variants:
-    - xai
-    - "x.ai"
-
-Microsoft:
-  variants:
-    - microsoft
-    - "microsoft research"
-    - "microsoft corporation"
-
-Meta:
-  variants:
-    - "meta ai"
-    - "meta platforms"
-    - "meta llama"
-
-NVIDIA:
-  variants:
-    - nvidia
-    - "nvidia corporation"
-    - "nvidia research"
-
+  - 10x genomics
+  - 10xgenomics
 AMD:
   variants:
-    - "advanced micro devices"
-    - "amd inc"
-
-# AI drug discovery / biotech
-Recursion Pharmaceuticals:
-  variants:
-    - recursion
-    - "recursion pharmaceuticals"
-
-Insilico Medicine:
-  variants:
-    - insilico
-    - "insilico medicine"
-
-BenevolentAI:
-  variants:
-    - benevolentai
-    - "benevolent ai"
-
-Exscientia:
-  variants:
-    - exscientia
-
-Generate Biomedicines:
-  variants:
-    - "generate biomedicines"
-    - "generate:biomedicines"
-
-AbSci:
-  variants:
-    - absci
-
-Isomorphic Labs:
-  variants:
-    - isomorphic
-    - "isomorphic labs"
-  parent: Google
-
-Xaira Therapeutics:
-  variants:
-    - xaira
-    - "xaira therapeutics"
-
-Treeline Biosciences:
-  variants:
-    - treeline
-    - "treeline biosciences"
-
-ImmunoGen:
-  variants:
-    - immunogen
-    - "immunogen inc"
-
-Sutro Biopharma:
-  variants:
-    - sutro
-    - "sutro biopharma"
-
-Mersana Therapeutics:
-  variants:
-    - mersana
-    - "mersana therapeutics"
-
-CytomX Therapeutics:
-  variants:
-    - cytomx
-    - "cytomx therapeutics"
-
-# Genomics / sequencing
-10x Genomics:
-  variants:
-    - "10x genomics"
-    - "10xgenomics"
-
-Oxford Nanopore:
-  variants:
-    - "oxford nanopore"
-    - "oxford nanopore technologies"
-    - ont
-
-Pacific Biosciences:
-  variants:
-    - pacbio
-    - "pacific biosciences"
-
-Thermo Fisher Scientific:
-  variants:
-    - "thermo fisher"
-    - thermofisher
-    - "thermo fisher scientific"
-
-BD Biosciences:
-  variants:
-    - "bd biosciences"
-    - "becton dickinson"
-
+  - advanced micro devices
+  - amd inc
 ATCC:
   variants:
-    - atcc
-    - "american type culture collection"
+  - atcc
+  - american type culture collection
+AbSci:
+  variants:
+  - absci
+AbbVie:
+  variants:
+  - abbvie
+Agilent:
+  variants:
+  - agilent
+  - agilent technologies
+Alphabet:
+  variants:
+  - alphabet
+  - alphabet inc
+Amgen:
+  variants:
+  - amgen
+Anthropic:
+  variants:
+  - anthropic
+Antibody Society:
+  variants:
+  - antibody society
+AstraZeneca:
+  variants:
+  - astrazeneca
+  - astra zeneca
+BD Biosciences:
+  variants:
+  - bd biosciences
+  - becton dickinson
+Bayer:
+  variants:
+  - bayer
+  - bayer pharma
+BenevolentAI:
+  variants:
+  - benevolentai
+  - benevolent ai
+BioNTech:
+  variants:
+  - biontech
+Biogen:
+  variants:
+  - biogen
+Bluebird Bio:
+  variants:
+  - bluebird
+  - bluebird bio
+Boehringer Ingelheim:
+  variants:
+  - boehringer ingelheim
+  - boehringer
+Bristol-Myers Squibb:
+  variants:
+  - bristol-myers squibb
+  - bristol myers squibb
+  - bms
+Caris:
+  variants:
+  - caris
+  - caris life sciences
+Celgene:
+  parent: Bristol-Myers Squibb
+  variants:
+  - celgene
+Crescioli et al.:
+  variants:
+  - crescioli et al.
+  - crescioli
+CytomX Therapeutics:
+  variants:
+  - cytomx
+  - cytomx therapeutics
+DKFZ:
+  variants:
+  - dkfz
+  - deutsches krebsforschungszentrum
+  - german cancer research center
+Daiichi Sankyo:
+  variants:
+  - daiichi sankyo
+  - daiichi
+DeepMind:
+  parent: Google
+  variants:
+  - deepmind
+  - google deepmind
+  - google deep mind
+EMBL:
+  variants:
+  - embl
+  - european molecular biology laboratory
+Eisai:
+  variants:
+  - eisai
+Eli Lilly:
+  variants:
+  - eli lilly
+  - lilly
+Exscientia:
+  variants:
+  - exscientia
+Foundation Medicine:
+  parent: Roche
+  variants:
+  - foundation medicine
+  - foundationone
+FutureHouse:
+  variants:
+  - futurehouse
+  - future house
+GSK:
+  variants:
+  - gsk
+  - glaxosmithkline
+  - glaxo smithkline
+Genentech:
+  parent: Roche
+  variants:
+  - genentech
+Generate Biomedicines:
+  variants:
+  - generate biomedicines
+  - generate:biomedicines
+Genome & Company:
+  variants:
+  - genome & company
+  - genome and company
+GenomeOncology:
+  variants:
+  - genomeoncology
+  - genome oncology
+Gilead:
+  variants:
+  - gilead
+  - gilead sciences
+Google:
+  variants:
+  - google
+  - google llc
+  - google inc
+  - google research
+Guardant Health:
+  variants:
+  - guardant health
+  - guardant
+Hengrui:
+  variants:
+  - hengrui
+  - jiangsu hengrui
+  - hengrui medicine
+  - hengrui pharmaceuticals
+Illumina:
+  variants:
+  - illumina
+ImmunoGen:
+  variants:
+  - immunogen
+  - immunogen inc
+Incyte:
+  variants:
+  - incyte
+Insilico Medicine:
+  variants:
+  - insilico
+  - insilico medicine
+Intercept Pharmaceuticals:
+  variants:
+  - intercept pharmaceuticals
+  - intercept
+Isomorphic Labs:
+  parent: Google
+  variants:
+  - isomorphic
+  - isomorphic labs
+Janssen:
+  parent: Johnson & Johnson
+  variants:
+  - janssen
+  - janssen pharmaceuticals
+Johnson & Johnson:
+  variants:
+  - johnson & johnson
+  - johnson and johnson
+MFPL:
+  variants:
+  - mfpl
+  - max f. perutz laboratories
+  - max perutz labs
+Max Planck Institute:
+  variants:
+  - max planck
+  - max-planck
+  - max planck institute
+  - mpi
+MedImmune:
+  parent: AstraZeneca
+  variants:
+  - medimmune
+Memorial Sloan Kettering Cancer Center:
+  variants:
+  - memorial sloan kettering
+  - mskcc
+  - sloan kettering
+Merck:
+  variants:
+  - merck
+  - merck kgaa
+  - merckgroup
+  - merck group
+  - merck darmstadt
+Merck & Co.:
+  variants:
+  - merck & co.
+  - merck and co
+  - msd
+  - merck sharp & dohme
+  - merck sharp and dohme
+  - merck sharp & dohme corp
+  - merck us
+  - merck research laboratories
+Mersana Therapeutics:
+  variants:
+  - mersana
+  - mersana therapeutics
+Meta:
+  variants:
+  - meta ai
+  - meta platforms
+  - meta llama
+Microsoft:
+  variants:
+  - microsoft
+  - microsoft research
+  - microsoft corporation
+MilliporeSigma:
+  parent: Merck
+  variants:
+  - milliporesigma
+  - millipore
+Mirati:
+  variants:
+  - mirati
+  - mirati therapeutics
+Moderna:
+  variants:
+  - moderna
+Myriad Genetics:
+  variants:
+  - myriad genetics
+  - myriad
+NVIDIA:
+  variants:
+  - nvidia
+  - nvidia corporation
+  - nvidia research
+NeoGenomics:
+  variants:
+  - neogenomics
+Novartis:
+  variants:
+  - novartis
+  - novartis pharma
+Novo Nordisk:
+  variants:
+  - novo nordisk
+OpenAI:
+  variants:
+  - openai
+  - open ai
+Oxford Nanopore:
+  variants:
+  - oxford nanopore
+  - oxford nanopore technologies
+  - ont
+Pacific Biosciences:
+  variants:
+  - pacbio
+  - pacific biosciences
+PanTarg:
+  variants:
+  - pantarg
+Pfizer:
+  variants:
+  - pfizer
+Recursion Pharmaceuticals:
+  variants:
+  - recursion
+  - recursion pharmaceuticals
+Regeneron:
+  variants:
+  - regeneron
+Roche:
+  variants:
+  - roche
+  - f. hoffmann-la roche
+Sanofi:
+  variants:
+  - sanofi
+  - sanofi aventis
+Sarah Cannon Research Institute:
+  variants:
+  - sarah cannon research institute
+  - sarah cannon
+Sarepta Therapeutics:
+  variants:
+  - sarepta therapeutics
+  - sarepta
+Seagen:
+  parent: Pfizer
+  variants:
+  - seagen
+Serono:
+  parent: Merck
+  variants:
+  - serono
+  - emd serono
+  - merck serono
+Sigma-Aldrich:
+  parent: Merck
+  variants:
+  - sigma-aldrich
+  - sigma aldrich
+  - sigmaaldrich
+Springworks:
+  variants:
+  - springworks
+  - springworks therapeutics
+Sutro Biopharma:
+  variants:
+  - sutro
+  - sutro biopharma
+Tacylix:
+  variants:
+  - tacylix
+Takeda:
+  variants:
+  - takeda
+Tempus:
+  variants:
+  - tempus
+  - tempus ai
+  - tempus labs
+Thermo Fisher Scientific:
+  variants:
+  - thermo fisher
+  - thermofisher
+  - thermo fisher scientific
+Treeline Biosciences:
+  variants:
+  - treeline
+  - treeline biosciences
+Ventana:
+  parent: Roche
+  variants:
+  - ventana
+  - ventana medical systems
+Xaira Therapeutics:
+  variants:
+  - xaira
+  - xaira therapeutics
+xAI:
+  variants:
+  - xai
+  - x.ai
+
+Alphamab:
+  variants:
+    - alphamab
+
+SystImmune:
+  variants:
+    - systimmune
+
+Kanghong:
+  variants:
+    - kanghong
+
+Innovent:
+  variants:
+    - innovent
+
+Simcere:
+  variants:
+    - simcere
+
+Qilu:
+  variants:
+    - qilu
+
+Medilink:
+  variants:
+    - medilink
+
+CrossBridge:
+  variants:
+    - crossbridge
+
+Drug Hunter:
+  variants:
+    - drug hunter

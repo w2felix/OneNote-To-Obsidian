@@ -1,0 +1,18 @@
+# Generated output vault — large (5500+ files, 790MB)
+obsidian_export/
+
+# Large ontology source files
+entity_data/hgnc_complete_set.tsv
+entity_data/mondo.json
+entity_data/hgnc_genes.json
+entity_data/mondo_diseases.json
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Sync state and AI cache
+.sync_state.json
+**/.sync_state.json
+.vision_ai_cache.json
+**/.vision_ai_cache.json
