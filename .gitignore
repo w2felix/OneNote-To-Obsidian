@@ -24,8 +24,8 @@ entity_data/mondo.json
 entity_data/hgnc_genes.json
 entity_data/mondo_diseases.json
 
-# Internal compound registry (confidential — local only)
-entity_data/internal_compounds.yaml
+# Entity data YAMLs (hand-curated, local only — rebuild with setup.py --update-entities)
+entity_data/*.yaml
 
 # Claude Code tooling
 .claude/
