@@ -51,6 +51,9 @@ FALSE_POSITIVE_GENES = {
     'ILD', 'IC', 'API', 'RCC', 'CMS',
     # Business/process abbreviations that collide with HGNC symbols
     'CDA', 'DD', 'SAR', 'JP', 'EI', 'HRD',
+    # Bioinformatics abbreviations — GRN is almost always "gene regulatory network"
+    # in this vault's computational biology / oncology context, not progranulin
+    'GRN',
     'ACE', 'BIN', 'ADD', 'BIG', 'BIT', 'BOX', 'BUS', 'CAR', 'CAT', 'COG',
     'COW', 'CRY', 'CUP', 'DAD', 'DAY', 'DIG', 'DIM', 'DOG', 'DOT', 'DRY',
     'DUG', 'EAR', 'EAT', 'EGG', 'ERA', 'EVE', 'EYE', 'FAD', 'FAT', 'FEW',
@@ -401,6 +404,14 @@ _FALSE_POSITIVE_DISEASES = {
     'canvas',
 }
 
+# Common English words that appear as 4+ char words in MONDO alias lookups but
+# should never act as triggers for disease candidate discovery. Filtered from
+# text_words before the inverted word index is queried.
+_DISEASE_INDEX_SKIP_WORDS = {
+    'face',      # alias for Fanconi anemia complementation group E (FACE)
+    'sensitive', # substring trigger for hypersensitivity disease entries
+}
+
 
 def _extract_diseases(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
     """Extract disease names using MONDO dictionary with inverted word index and pre-compiled patterns."""
@@ -413,7 +424,7 @@ def _extract_diseases(text: str, dicts: EntityDictionaries) -> list[EntityMentio
 
     # Get the inverted index and find candidate diseases
     word_index = _get_disease_word_index(dicts)
-    text_words = set(re.findall(r'[a-z]{4,}', text_lower))
+    text_words = set(re.findall(r'[a-z]{4,}', text_lower)) - _DISEASE_INDEX_SKIP_WORDS
 
     candidates = set()
     for word in text_words:

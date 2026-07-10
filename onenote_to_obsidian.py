@@ -1807,6 +1807,12 @@ def determine_actions(state: dict, pages: list[dict], args) -> list[dict]:
                                 entry['vision_att_hash'] = att_hash
                                 stored = att_hash
                         needs_vision = (stored != att_hash)
+            # Obsidian file may have been deleted even though OneNote is unchanged
+            if entry.get('active_file') and entry.get('status') != 'user_deleted':
+                active_path = Path(args.output_dir) / entry['active_file']
+                if not _path_exists_safe(active_path):
+                    actions.append({'type': 'reexport', 'page': page, 'key': key, 'entry': entry})
+                    continue
             if needs_tags or needs_vision:
                 actions.append({'type': 'ai-enrich', 'page': page, 'key': key, 'entry': entry})
             continue

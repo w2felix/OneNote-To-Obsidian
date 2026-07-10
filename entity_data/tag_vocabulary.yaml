@@ -8,6 +8,11 @@
 #     - synonym2
 
 # --- Domain tags ---
+computational-biology:
+  - comp-bio
+  - computational biology
+  - bioinformatics
+
 antibody-drug-conjugates:
   - adc
   - antibody-drug-conjugate
@@ -106,3 +111,28 @@ conference-notes:
 meeting-notes:
   - meeting-minutes
   - team-meeting
+
+# --- Journal club / methods review tags ---
+journal-club:
+  - journal club
+  - jc
+  - paper discussion
+
+co-expression-networks:
+  - co-expression
+  - coexpression networks
+  - coexpression
+  - gene co-expression
+  - gene coexpression
+
+statistical-methods:
+  - statistical methods
+  - statistics
+  - statistical analysis
+  - stats
+
+benchmarking:
+  - benchmark
+  - benchmarks
+  - method benchmarking
+  - benchmarked

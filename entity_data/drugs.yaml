@@ -1048,3 +1048,19 @@ SYD985:
   variants:
     - syd985
   class: Duocarmycin-containing ADC
+
+MMAE:
+  variants:
+    - mmae
+  class: microtubule inhibitor
+
+MMAF:
+  variants:
+    - mmaf
+  class: microtubule inhibitor
+
+Tremelimumab:
+  variants:
+    - tremelimumab
+    - anti-ctla-4
+  class: Anti-CTLA-4 checkpoint inhibitor
