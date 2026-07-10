@@ -510,10 +510,13 @@ def _collect_from_container(container, path_prefix: str, pages: list):
             parent_name = parent_stack[-1][0] if parent_stack else None
             parent_idx = parent_stack[-1][1] if parent_stack else None
 
+            ancestor_names = [entry[0] for entry in parent_stack]
+
             page_entry = {
                 **page,
                 'section_path': sec_path,
                 'parent_page': parent_name,
+                'ancestor_names': ancestor_names,
                 'children': [],
             }
             current_idx = len(pages)
@@ -730,14 +733,16 @@ def _convert_page_xml_inner(xml_path: Path, page_info: dict, skip_images: bool) 
             lines.append(f'section: "{"/".join(parts[1:])}"')
 
     if page_info.get('parent_page'):
-        safe_parent = page_info['parent_page'].replace('"', "'")
+        parent_display = page_info.get('parent_display_name', page_info['parent_page'])
+        safe_parent = parent_display.replace('"', "'")
         lines.append(f'parent: "[[{safe_parent}]]"')
 
     # Children backlinks (Feature 4)
-    if page_info.get('children'):
+    children_display = page_info.get('children_display_names', page_info.get('children', []))
+    if children_display:
         lines.append('children:')
-        for child_name in page_info['children']:
-            safe_child = child_name.replace('"', "'")
+        for child_display in children_display:
+            safe_child = child_display.replace('"', "'")
             lines.append(f'  - "[[{safe_child}]]"')
 
     # Tags from OneNote (Feature 1)
@@ -1343,12 +1348,15 @@ _WINDOWS_RESERVED = frozenset({
 
 def sanitize_filename(name: str) -> str:
     """Remove characters invalid for file paths on Windows."""
-    invalid_chars = r'<>:"/\|?*'
+    invalid_chars = r'<>"/\|?*'
     result = name
+    result = result.replace(':', ' -')
     for ch in invalid_chars:
         result = result.replace(ch, '_')
-    result = result.rstrip('. ')
+    result = result.strip('. ')
+    result = re.sub(r'  +', ' ', result)
     result = re.sub(r'_+', '_', result)
+    result = result.strip()
     # Block Windows reserved device names
     if result.split('.')[0].upper() in _WINDOWS_RESERVED:
         result = f'_{result}'
@@ -1357,8 +1365,28 @@ def sanitize_filename(name: str) -> str:
     return result or 'Untitled'
 
 
+def strip_parent_prefix(page_name: str, parent_name: str) -> str:
+    """Strip redundant parent prefix from a child page name."""
+    for sep in (': ', '_ ', '- ', ' - '):
+        prefix = parent_name + sep
+        if page_name.startswith(prefix):
+            stripped = page_name[len(prefix):]
+            if stripped:
+                return stripped
+    return page_name
+
+
+def compute_display_name(page_info: dict) -> str:
+    """Compute the filename stem (without .md) for this page."""
+    page_name = page_info['name']
+    parent_name = page_info.get('parent_page')
+    if parent_name:
+        page_name = strip_parent_prefix(page_name, parent_name)
+    return sanitize_filename(page_name)
+
+
 def compute_output_path(page_info: dict, vault_mode: str) -> str:
-    """Compute relative output path for a page."""
+    """Compute relative output path for a page, nesting sub-pages in subdirectories."""
     section_path = page_info['section_path']
     parts = section_path.split('/')
     safe_parts = [sanitize_filename(p) for p in parts]
@@ -1366,8 +1394,47 @@ def compute_output_path(page_info: dict, vault_mode: str) -> str:
     if vault_mode == 'multi':
         safe_parts = safe_parts[1:]  # Remove notebook name (it becomes vault root)
 
-    page_name = sanitize_filename(page_info['name'])
+    for ancestor_display in page_info.get('ancestor_display_names', page_info.get('ancestor_names', [])):
+        safe_parts.append(sanitize_filename(ancestor_display))
+
+    page_name = compute_display_name(page_info)
     return '/'.join(safe_parts + [page_name + '.md'])
+
+
+def _enrich_display_names(all_pages: list[dict]):
+    """Post-process pages to set display_name, parent_display_name, children_display_names."""
+    name_to_idx: dict[str, int] = {}
+    for idx, page in enumerate(all_pages):
+        page['display_name'] = compute_display_name(page)
+        name_to_idx.setdefault(page['name'], idx)
+
+    for page in all_pages:
+        if page.get('parent_page'):
+            parent_idx = name_to_idx.get(page['parent_page'])
+            if parent_idx is not None:
+                page['parent_display_name'] = all_pages[parent_idx]['display_name']
+            else:
+                page['parent_display_name'] = sanitize_filename(page['parent_page'])
+
+        if page.get('children'):
+            children_display = []
+            for child_name in page['children']:
+                child_idx = name_to_idx.get(child_name)
+                if child_idx is not None:
+                    children_display.append(all_pages[child_idx]['display_name'])
+                else:
+                    children_display.append(sanitize_filename(child_name))
+            page['children_display_names'] = children_display
+
+        # Build ancestor display names for folder segments
+        ancestor_display = []
+        for ancestor_name in page.get('ancestor_names', []):
+            ancestor_idx = name_to_idx.get(ancestor_name)
+            if ancestor_idx is not None:
+                ancestor_display.append(all_pages[ancestor_idx]['display_name'])
+            else:
+                ancestor_display.append(sanitize_filename(ancestor_name))
+        page['ancestor_display_names'] = ancestor_display
 
 
 # ============================================================================
@@ -1784,6 +1851,13 @@ def determine_actions(state: dict, pages: list[dict], args) -> list[dict]:
             actions.append({'type': 'new', 'page': page, 'key': key})
             continue
 
+        # Detect path change (e.g. flat → nested folder structure)
+        new_rel_path = compute_output_path(page, args.vault_mode)
+        if entry.get('active_file') and entry['active_file'] != new_rel_path:
+            actions.append({'type': 'reexport', 'page': page, 'key': key, 'entry': entry,
+                            'old_path': entry['active_file']})
+            continue
+
         onenote_changed = (page['modified'] != entry.get('onenote_modified'))
 
         if not onenote_changed:
@@ -1978,6 +2052,18 @@ def execute_actions(actions: list[dict], state: dict, args, temp_dir: Path,
         elif atype in ('new', 'update', 'reexport'):
             _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
                            page_id_map, all_page_names)
+
+        # Clean up old file when path has changed (migration to nested structure)
+        old_path_rel = action.get('old_path')
+        if old_path_rel and old_path_rel != rel_path and _path_exists_safe(full_path):
+            old_full = out_dir / old_path_rel
+            if _path_exists_safe(old_full):
+                os.remove(_win_safe_path(old_full))
+                try:
+                    old_full.parent.rmdir()
+                except OSError:
+                    pass
+                safe_print(f'\n  [M] Migrated: {old_path_rel} -> {rel_path}')
 
         safe_print(f'\r  [{atype[0].upper()}] {i+1}/{len(actions)} {page.get("name", "")[:50]:<50}',
                    end='', flush=True)
@@ -2499,7 +2585,7 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
 
     # Auto-wikilinks
     if all_page_names:
-        markdown = _auto_wikify(markdown, all_page_names, page['name'])
+        markdown = _auto_wikify(markdown, all_page_names, page.get('display_name', page['name']))
 
     # Language detection — inject into frontmatter
     _, body_part = _split_frontmatter(markdown)
@@ -2580,11 +2666,11 @@ def _handle_conflict(action, state, args, temp_dir, full_path, out_dir, rel_path
 
     # Auto-wikilinks on conflict file too
     if all_page_names:
-        markdown = _auto_wikify(markdown, all_page_names, page['name'])
+        markdown = _auto_wikify(markdown, all_page_names, page.get('display_name', page['name']))
 
     # Generate conflict filename
     today = datetime.now().strftime('%Y-%m-%d')
-    base_name = sanitize_filename(page['name'])
+    base_name = page.get('display_name', sanitize_filename(page['name']))
     conflict_name = f'{base_name} (OneNote conflict {today}).md'
     conflict_path = full_path.parent / conflict_name
 
@@ -2729,6 +2815,7 @@ Write-Output "DONE"
         notebooks = parse_hierarchy(hierarchy_path)
 
         all_pages = collect_all_pages(notebooks, args.notebooks, args.exclude_notebooks)
+        _enrich_display_names(all_pages)
         print(f'  Found {len(all_pages)} pages across {len(notebooks)} notebooks.')
 
         if args.notebooks:
@@ -2758,10 +2845,10 @@ Write-Output "DONE"
         else:
             actions = determine_actions(state, all_pages, args)
 
-        # Build page ID → name map for resolving onenote:// links
-        page_id_map = {p['id']: p['name'].strip() for p in all_pages}
-        # Build set of all page names for auto-wikilinks
-        all_page_names = {p['name'].strip() for p in all_pages}
+        # Build page ID → display name map for resolving onenote:// links
+        page_id_map = {p['id']: p.get('display_name', p['name'].strip()) for p in all_pages}
+        # Build set of all display names for auto-wikilinks
+        all_page_names = {p.get('display_name', p['name'].strip()) for p in all_pages}
 
         if args.dry_run:
             print_dry_run(actions, state)
