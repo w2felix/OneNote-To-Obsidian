@@ -1,0 +1,64 @@
+# Denylist for auto-extended entity dictionaries.
+#
+# extend_dictionaries.py asks an LLM for entities that are novel relative to the
+# curated dictionaries, then appends them. Without this file, any entry deleted
+# from companies.yaml or drugs.yaml gets silently re-added the next time a note
+# mentions the term — a regeneration loop that undoes curation.
+#
+# Two independent guards:
+#   canonicals — entity names that must never become dictionary entries at all
+#   variants   — bare match terms that must never be attached to ANY entry,
+#                even a legitimate one
+#
+# The variants guard matters because a single common English word as a variant
+# pollutes both entity extraction (frontmatter) and wikification (body links).
+# pipeline/vault_core/wikify.py::WIKIFY_SKIP_WORDS is also applied on top of the
+# list below; it blocks linking but not extraction, so this file is the stronger
+# guard and the two are deliberately not merged.
+#
+# Adding a term here does NOT remove an existing variant from companies.yaml —
+# it only prevents future auto-extension from (re)introducing it. Curated
+# removals still have to be made in companies.yaml by hand.
+
+canonicals:
+  companies:
+    # Research consortia and reference datasets, not companies. `encode` also
+    # collides with the English verb across ~45 vault files.
+    - ENCODE
+    - 1000 Genomes
+    - GTEx
+    - TCGA
+    # Author-name artifact from citation text misread as an organization.
+    - Crescioli et al.
+  drugs: []
+
+# Bare terms that must never be registered as a variant of any entity, because
+# the non-company sense dominates in a computational-oncology / AI-ML vault.
+# Every entry below is either an observed false positive (marked) or a forward
+# guard for a company name whose bare word is common English. None of them is
+# currently a bare variant in companies.yaml, so nothing legitimate is lost.
+variants:
+  # Observed false positives from real ingestion runs
+  - broad          # "broad goal" -> Broad Institute
+  - manifold       # dimensionality reduction -> Manifold Bio
+  - modal          # UI dialog, "multi-modal" -> Modal
+  - encode         # the verb -> ENCODE
+  - intercept      # regression intercept -> Intercept Pharmaceuticals
+  - myriad         # "a myriad of" -> Myriad Genetics
+  - recursion      # the CS concept -> Recursion Pharmaceuticals
+  # Forward guards: common words that are also real company names
+  - generate       # the verb -> Generate Biomedicines
+  - meta           # "meta-analysis" -> Meta
+  - atlas          # cell atlas -> Atlas Bio
+  - arc            # Arc Institute
+  - element        # Element Biosciences
+  - vector         # viral vector, math vector
+  - flow           # flow cytometry
+  - scale          # Scale AI
+  - target         # drug target
+  - pathway
+  - signal
+  - precision      # precision oncology
+  - resolution
+  - discovery
+  - insight
