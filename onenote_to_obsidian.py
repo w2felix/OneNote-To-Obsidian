@@ -18,6 +18,7 @@ import html
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -117,6 +118,13 @@ def parse_args():
         '--dataview', action='store_true',
         help='Use Dataview mode: entities in YAML frontmatter + entity index pages. '
              'Without this flag, entities are linked as native [[wikilinks]] in body text.'
+    )
+    parser.add_argument(
+        '--orphan-action', choices=['keep', 'drop', 'delete'], default='keep',
+        help='What to do when a synced page disappears from OneNote. '
+             '"keep" marks it orphaned in state and keeps the vault file (default); '
+             '"drop" removes it from sync tracking but leaves the vault file untouched; '
+             '"delete" removes the vault file and the tracking entry.'
     )
     return parser.parse_args()
 
@@ -944,8 +952,15 @@ _CODE_LINE_SENTINEL = '\x00CODE\x00'
 def _convert_oe_children(elem, ns, style_map, images, skip_images, indent) -> str:
     """Convert an OEChildren element to markdown."""
     lines = []
+    list_counter = 0
     for oe in elem.findall('one:OE', ns):
-        line = _convert_oe(oe, ns, style_map, images, skip_images, indent)
+        _list = oe.find('one:List', ns)
+        if _list is not None and _list.find('one:Number', ns) is not None:
+            list_counter += 1
+        else:
+            list_counter = 0
+
+        line = _convert_oe(oe, ns, style_map, images, skip_images, indent, list_counter)
         if line is not None:
             lines.append(line)
 
@@ -983,7 +998,7 @@ def _group_code_lines(lines: list[str]) -> str:
     return '\n'.join(result)
 
 
-def _convert_oe(oe_elem, ns, style_map, images, skip_images, indent) -> str | None:
+def _convert_oe(oe_elem, ns, style_map, images, skip_images, indent, item_number: int = 1) -> str | None:
     """Convert a single OE element to a markdown line."""
     # Check for table
     table = oe_elem.find('one:Table', ns)
@@ -1032,7 +1047,7 @@ def _convert_oe(oe_elem, ns, style_map, images, skip_images, indent) -> str | No
     elif bullet is not None:
         prefix = f'{indent_str}- '
     elif number is not None:
-        prefix = f'{indent_str}1. '
+        prefix = f'{indent_str}{item_number}. '
     elif style_name in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
         level = int(style_name[1]) + 1  # h1 → ## (since title is #)
         prefix = '#' * level + ' '
@@ -1834,6 +1849,33 @@ def _att_folder_hash(att_dir: Path) -> str:
     return hashlib.sha256(str(entries).encode()).hexdigest()[:16]
 
 
+def _try_rmdir_parents(child: Path, stop_at: Path):
+    """Walk up from child removing empty directories, stop at stop_at."""
+    current = child
+    while current != stop_at and current.parent != current:
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
+
+
+def _verify_migration_target(old_parent: Path, new_parent: Path) -> bool:
+    """Return True if all files from old_parent exist at new_parent (safe to delete old)."""
+    for subfolder in (ATTACHMENTS_FOLDER, _AI_NOTES_FOLDER_NAME):
+        old_sub = old_parent / subfolder
+        new_sub = new_parent / subfolder
+        if not _path_exists_safe(old_sub):
+            continue
+        if not _path_exists_safe(new_sub):
+            return False
+        with os.scandir(_win_safe_path(old_sub)) as it:
+            for e in it:
+                if e.is_file() and not _path_exists_safe(new_sub / e.name):
+                    return False
+    return True
+
+
 def determine_actions(state: dict, pages: list[dict], args) -> list[dict]:
     """Compare state against current pages, return list of sync actions."""
     actions = []
@@ -1919,10 +1961,54 @@ def determine_actions(state: dict, pages: list[dict], args) -> list[dict]:
             if entry.get('status') != 'orphaned':
                 actions.append({'type': 'orphan', 'key': key, 'entry': entry})
 
+    # Auto-detect moves: when OneNote moves a page via cut+paste it assigns a new GUID,
+    # making the old entry orphaned and the new one appear as "new". Match them by filename
+    # stem (1:1 only — skip ambiguous cases where multiple pages share the same name).
+    orphan_by_stem: dict[str, list] = {}
+    for a in actions:
+        if a['type'] == 'orphan':
+            active_file = a['entry'].get('active_file', '')
+            if active_file:
+                stem = Path(active_file).stem
+                orphan_by_stem.setdefault(stem, []).append(a)
+
+    if orphan_by_stem:
+        new_by_name: dict[str, list] = {}
+        for a in actions:
+            if a['type'] == 'new':
+                display = a['page'].get('display_name', sanitize_filename(a['page']['name']))
+                new_by_name.setdefault(display, []).append(a)
+
+        move_orphan_keys: set[str] = set()
+        move_new_keys: set[str] = set()
+        move_actions = []
+
+        for stem, o_list in orphan_by_stem.items():
+            n_list = new_by_name.get(stem, [])
+            if len(o_list) == 1 and len(n_list) == 1:
+                o = o_list[0]
+                n = n_list[0]
+                move_actions.append({
+                    'type': 'move',
+                    'page': n['page'],
+                    'key': n['key'],
+                    'old_key': o['key'],
+                    'old_path': o['entry'].get('active_file'),
+                    'entry': o['entry'],
+                })
+                move_orphan_keys.add(o['key'])
+                move_new_keys.add(n['key'])
+
+        if move_actions:
+            actions = [a for a in actions
+                       if not (a['type'] == 'orphan' and a['key'] in move_orphan_keys)
+                       and not (a['type'] == 'new' and a['key'] in move_new_keys)]
+            actions.extend(move_actions)
+
     return actions
 
 
-def print_dry_run(actions: list[dict], state: dict):
+def print_dry_run(actions: list[dict], state: dict, args=None):
     """Print summary of what would happen."""
     by_type = {}
     for action in actions:
@@ -1935,12 +2021,19 @@ def print_dry_run(actions: list[dict], state: dict):
         print(f'Last sync: {state["last_sync"]}')
     print()
 
+    orphan_action = getattr(args, 'orphan_action', 'keep') if args else 'keep'
+    orphan_labels = {
+        'keep':   ('ORPHANED (deleted from OneNote — file kept on disk)', '[O]'),
+        'drop':   ('ORPHANED — drop from tracking, vault file kept', '[O]'),
+        'delete': ('ORPHANED — vault file will be deleted', '[O]'),
+    }
     type_labels = {
         'new': ('NEW', '[N]'),
         'update': ('UPDATE (OneNote changed)', '[U]'),
         'conflict': ('CONFLICT (both changed)', '[C]'),
         'reexport': ('RE-EXPORT', '[R]'),
-        'orphan': ('ORPHANED (deleted from OneNote)', '[O]'),
+        'orphan': orphan_labels[orphan_action],
+        'move': ('MOVE (same name, new OneNote ID — file will be relocated)', '[M]'),
         'keep_obsidian': ('KEEP OBSIDIAN (update state only)', '[K]'),
         'ai-enrich': ('AI PROCESSING (tags/vision pending)', '[A]'),
     }
@@ -1956,9 +2049,14 @@ def print_dry_run(actions: list[dict], state: dict):
             for item in items[:10]:
                 page = item.get('page', {})
                 entry = item.get('entry', {})
-                path = page.get('section_path', entry.get('onenote_path', ''))
-                name = page.get('name', entry.get('page_name', '?'))
-                safe_print(f'  {marker} {path}/{name}')
+                if action_type == 'move':
+                    old = item.get('old_path', '?')
+                    new_path = page.get('section_path', '') + '/' + page.get('name', '?')
+                    safe_print(f'  {marker} {old}  ->  {new_path}')
+                else:
+                    path = page.get('section_path', entry.get('onenote_path', ''))
+                    name = page.get('name', entry.get('page_name', '?'))
+                    safe_print(f'  {marker} {path}/{name}')
             if len(items) > 10:
                 safe_print(f'  ... ({len(items) - 10} more)')
             print()
@@ -1978,7 +2076,7 @@ def execute_actions(actions: list[dict], state: dict, args, temp_dir: Path,
     # Track used file paths to handle duplicates
     used_paths = set()
 
-    # Collect page IDs that need content export
+    # Collect page IDs that need content export ('move' reuses the existing file, no export needed)
     pages_to_export = [
         a['page'] for a in actions if a['type'] in ('new', 'update', 'conflict', 'reexport')
     ]
@@ -2011,8 +2109,24 @@ def execute_actions(actions: list[dict], state: dict, args, temp_dir: Path,
 
         if atype == 'orphan':
             entry = action['entry']
-            entry['status'] = 'orphaned'
-            print(f'  [O] Orphaned: {entry.get("page_name", "?")}')
+            orphan_action = getattr(args, 'orphan_action', 'keep')
+            page_name = entry.get('page_name', '?')
+            if orphan_action == 'drop':
+                state['pages'].pop(key, None)
+                print(f'  [O] Dropped from tracking: {page_name}')
+            elif orphan_action == 'delete':
+                active_file = entry.get('active_file')
+                if active_file:
+                    file_path = Path(args.output_dir) / active_file
+                    if _path_exists_safe(file_path):
+                        os.remove(_win_safe_path(file_path))
+                        print(f'  [O] Deleted: {page_name}')
+                    else:
+                        print(f'  [O] Already gone: {page_name}')
+                state['pages'].pop(key, None)
+            else:  # keep (default)
+                entry['status'] = 'orphaned'
+                print(f'  [O] Orphaned: {page_name}')
             continue
 
         if atype == 'ai-enrich':
@@ -2046,6 +2160,8 @@ def execute_actions(actions: list[dict], state: dict, args, temp_dir: Path,
 
         if atype == 'keep_obsidian':
             _handle_keep_obsidian(action, state, args, full_path, rel_path)
+        elif atype == 'move':
+            _handle_move(action, state, args, full_path, out_dir, rel_path)
         elif atype == 'conflict':
             _handle_conflict(action, state, args, temp_dir, full_path, out_dir, rel_path,
                              page_id_map, all_page_names)
@@ -2053,16 +2169,53 @@ def execute_actions(actions: list[dict], state: dict, args, temp_dir: Path,
             _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
                            page_id_map, all_page_names)
 
-        # Clean up old file when path has changed (migration to nested structure)
+        # Clean up old file when path has changed (section moved in OneNote)
         old_path_rel = action.get('old_path')
         if old_path_rel and old_path_rel != rel_path and _path_exists_safe(full_path):
             old_full = out_dir / old_path_rel
-            if _path_exists_safe(old_full):
-                os.remove(_win_safe_path(old_full))
-                try:
-                    old_full.parent.rmdir()
-                except OSError:
-                    pass
+            old_parent = old_full.parent
+            new_parent = full_path.parent
+
+            if _win_safe_path(old_parent) != _win_safe_path(new_parent):
+                # Phase 1: Copy attachments/ai_notes to new location
+                for subfolder in (ATTACHMENTS_FOLDER, _AI_NOTES_FOLDER_NAME):
+                    old_sub = old_parent / subfolder
+                    new_sub = new_parent / subfolder
+                    if not _path_exists_safe(old_sub):
+                        continue
+                    _mkdir_safe(new_sub, exist_ok=True)
+                    with os.scandir(_win_safe_path(old_sub)) as it:
+                        for e in it:
+                            dst = new_sub / e.name
+                            if not _path_exists_safe(dst):
+                                shutil.copy2(
+                                    _win_safe_path(old_sub / e.name),
+                                    _win_safe_path(dst))
+
+                # Phase 2: Verify all old content exists at new location
+                if _verify_migration_target(old_parent, new_parent):
+                    # Safe to remove old files
+                    if _path_exists_safe(old_full):
+                        os.remove(_win_safe_path(old_full))
+                    for subfolder in (ATTACHMENTS_FOLDER, _AI_NOTES_FOLDER_NAME):
+                        old_sub = old_parent / subfolder
+                        if _path_exists_safe(old_sub):
+                            try:
+                                shutil.rmtree(_win_safe_path(old_sub))
+                            except OSError:
+                                pass
+                    _try_rmdir_parents(old_parent, out_dir)
+                    safe_print(f'\n  [M] Migrated: {old_path_rel} -> {rel_path}')
+                else:
+                    # Verification failed — keep old files, log warning
+                    if _path_exists_safe(old_full):
+                        os.remove(_win_safe_path(old_full))
+                    safe_print(f'\n  [!] Partial migrate: {old_path_rel} -> {rel_path}'
+                               f' (old attachments kept — verify manually)')
+            else:
+                # Same parent dir, just remove old .md
+                if _path_exists_safe(old_full):
+                    os.remove(_win_safe_path(old_full))
                 safe_print(f'\n  [M] Migrated: {old_path_rel} -> {rel_path}')
 
         safe_print(f'\r  [{atype[0].upper()}] {i+1}/{len(actions)} {page.get("name", "")[:50]:<50}',
@@ -2651,6 +2804,61 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
             state['pages'][key]['vision_att_hash'] = _att_folder_hash(att_dir)
 
 
+def _handle_move(action, state, args, full_path, out_dir, rel_path):
+    """Move an existing Obsidian file to a new path when OneNote moved the page (new GUID, same name)."""
+    page = action['page']
+    key = action['key']
+    old_key = action['old_key']
+    old_path_rel = action['old_path']
+
+    if not old_path_rel:
+        return
+
+    old_full = out_dir / old_path_rel
+    if not _path_exists_safe(old_full):
+        return
+
+    _mkdir_safe(full_path.parent, exist_ok=True)
+    shutil.move(_win_safe_path(old_full), _win_safe_path(full_path))
+
+    # Move or merge the _attachments folder
+    old_att = old_full.parent / ATTACHMENTS_FOLDER
+    new_att = full_path.parent / ATTACHMENTS_FOLDER
+    if _path_exists_safe(old_att) and _win_safe_path(old_att) != _win_safe_path(new_att):
+        if _path_exists_safe(new_att):
+            with os.scandir(_win_safe_path(old_att)) as it:
+                for e in it:
+                    src = old_att / e.name
+                    dst = new_att / e.name
+                    if not _path_exists_safe(dst):
+                        shutil.move(_win_safe_path(src), _win_safe_path(dst))
+            try:
+                old_att.rmdir()
+            except OSError:
+                pass
+        else:
+            shutil.move(_win_safe_path(old_att), _win_safe_path(new_att))
+
+    # Remove now-empty old section directory
+    try:
+        old_full.parent.rmdir()
+    except OSError:
+        pass
+
+    # Drop old state entry, register new page at new path
+    state['pages'].pop(old_key, None)
+    state['pages'][key] = {
+        'onenote_id': page['id'],
+        'onenote_path': page['section_path'],
+        'page_name': page['name'],
+        'onenote_modified': page['modified'],
+        'active_file': rel_path,
+        'content_hash': file_hash(full_path) if _path_exists_safe(full_path) else '',
+        'file_mtime': os.stat(_win_safe_path(full_path)).st_mtime if _path_exists_safe(full_path) else None,
+        'status': 'synced',
+    }
+
+
 def _handle_conflict(action, state, args, temp_dir, full_path, out_dir, rel_path,
                      page_id_map=None, all_page_names=None):
     """Handle conflict: write OneNote version as conflict file, keep Obsidian version."""
@@ -2851,7 +3059,7 @@ Write-Output "DONE"
         all_page_names = {p.get('display_name', p['name'].strip()) for p in all_pages}
 
         if args.dry_run:
-            print_dry_run(actions, state)
+            print_dry_run(actions, state, args)
         else:
             execute_actions(actions, state, args, temp_dir, page_id_map, all_page_names)
             state['last_run'] = {

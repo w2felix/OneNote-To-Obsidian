@@ -14,6 +14,11 @@ logger = logging.getLogger(__name__)
 
 ENTITY_INDEX_FOLDER = '_entity_index'
 
+# Entity types excluded from index page generation.
+# methods → covered by tags; roles/departments → internal org data from OneNote;
+# conferences → superseded by Conferences/ vault notes and tags.
+SKIP_ENTITY_TYPES = {'methods', 'roles', 'departments', 'conferences'}
+
 
 def generate_entity_index(output_dir: Path, state: dict):
     """Generate/update entity index pages from sync state entity data.
@@ -27,20 +32,13 @@ def generate_entity_index(output_dir: Path, state: dict):
         logger.info("No entity data in state, skipping index generation")
         return
 
-    # Aggregate all entities across all pages
+    # Aggregate all entities across all pages (skip low-value types)
     all_entities: dict[str, dict[str, set]] = {
-        'genes': {},
-        'drugs': {},
-        'diseases': {},
-        'compounds': {},
-        'companies': {},
-        'roles': {},
-        'methods': {},
-        'clinical_trials': {},
-        'cell_lines': {},
-        'conferences': {},
-        'pathways': {},
-        'departments': {},
+        t: {} for t in (
+            'genes', 'drugs', 'diseases', 'compounds', 'companies',
+            'roles', 'methods', 'clinical_trials', 'cell_lines',
+            'conferences', 'pathways', 'departments',
+        ) if t not in SKIP_ENTITY_TYPES
     }
 
     for page_key, page_data in entities_state.items():
