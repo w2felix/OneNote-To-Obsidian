@@ -11,6 +11,19 @@ logger = logging.getLogger(__name__)
 COMPOUND_RE = re.compile(r'\bM(\d{4})\b')
 CHEMLIB_RE = re.compile(r'\bMSC(\d{6,9})\b')
 
+# Characters that, immediately before a candidate term, indicate it's actually
+# part of a larger compound word/token rather than a standalone occurrence
+# (e.g. "modal" inside "multi-modal", "MOSAIC" inside "COMPOTES/MOSAIC").
+# Left-side only: a trailing hyphen is left as an ordinary \b boundary so
+# adjectival gene/method usage still matches ("KRAS-mutant", "CRISPR-based").
+_LEFT_JOIN_EXCLUDE = r"[A-Za-z0-9\-/]"
+
+
+def _isolated_pattern(term: str, flags: int = re.IGNORECASE) -> re.Pattern:
+    """Word-boundary pattern that also rejects a hyphen/slash immediately
+    preceding the term, so it doesn't match inside a compound word."""
+    return re.compile(rf"(?<!{_LEFT_JOIN_EXCLUDE}){re.escape(term)}\b", flags)
+
 # Context words that indicate biomedical content nearby (for short gene symbol validation)
 BIOMEDICAL_CONTEXT_WORDS = {
     'cancer', 'tumor', 'tumour', 'mutation', 'inhibitor', 'antibody', 'receptor',
@@ -243,6 +256,20 @@ def _has_biomedical_context(text: str, pos: int, window: int = 100) -> bool:
     return any(word in snippet for word in BIOMEDICAL_CONTEXT_WORDS)
 
 
+# Negation cues checked immediately before a candidate match (e.g. "...is not
+# an ADC company" should not extract ADC as a method mention).
+_NEGATION_CUES = (
+    "not a", "not an", "isn't a", "isn't an", "is not a", "is not an",
+    "no longer a", "no longer an", "never a", "never an",
+)
+
+
+def _is_negated(text_lower: str, pos: int, window: int = 40) -> bool:
+    """True if a negation cue appears immediately before the match position."""
+    start = max(0, pos - window)
+    return any(cue in text_lower[start:pos] for cue in _NEGATION_CUES)
+
+
 def _extract_compounds(text: str, dicts: EntityDictionaries) -> list[EntityMention]:
     """Extract M#### compound codes and MSC###### chemical library numbers."""
     mentions = []
@@ -365,9 +392,9 @@ def _get_disease_word_index(dicts: EntityDictionaries) -> dict[str, list[str]]:
             longest = max(words, key=len)
             index.setdefault(longest, []).append(disease_key)
 
-        # Pre-compile word-boundary regex pattern for this disease
-        # Escaped to handle special regex chars, wrapped with \b for word boundaries
-        patterns[disease_key] = re.compile(r'\b' + re.escape(disease_key) + r'\b', re.IGNORECASE)
+        # Pre-compile isolated-match pattern for this disease (word boundary,
+        # plus rejects a hyphen/slash immediately before — see _isolated_pattern)
+        patterns[disease_key] = _isolated_pattern(disease_key)
 
     _disease_word_index = index
     _disease_patterns = patterns
@@ -402,6 +429,8 @@ _FALSE_POSITIVE_DISEASES = {
     'traps', 'trap', 'park', 'mono', 'cast', 'cord', 'ring', 'crest', 'charge',
     # Project/tool names that match rare disease acronyms
     'canvas',
+    # Abbreviations/product names that collide with MONDO synonyms
+    'incl', 'mosaic',
 }
 
 # Common English words that appear as 4+ char words in MONDO alias lookups but
@@ -476,7 +505,8 @@ def _extract_diseases(text: str, dicts: EntityDictionaries) -> list[EntityMentio
 
 
 def _extract_from_variants(text_lower: str, variants: dict[str, str],
-                           entity_type: str, min_len: int = 3) -> list[EntityMention]:
+                           entity_type: str, min_len: int = 3,
+                           check_negation: bool = False) -> list[EntityMention]:
     """Extract entities by matching variant spellings against text."""
     mentions = []
     seen = set()
@@ -484,8 +514,10 @@ def _extract_from_variants(text_lower: str, variants: dict[str, str],
     for variant_lower, canonical in variants.items():
         if len(variant_lower) < min_len:
             continue
-        pattern = r'\b' + re.escape(variant_lower) + r'\b'
-        if re.search(pattern, text_lower):
+        match = _isolated_pattern(variant_lower).search(text_lower)
+        if match:
+            if check_negation and _is_negated(text_lower, match.start()):
+                continue
             if canonical in seen:
                 continue
             seen.add(canonical)
@@ -525,8 +557,7 @@ ROLE_TITLES = [
 # Pre-sorted longest-first so "Senior Director" matches before "Director"
 ROLE_TITLES.sort(key=len, reverse=True)
 
-_role_patterns = [(title, re.compile(r'\b' + re.escape(title) + r'\b', re.IGNORECASE))
-                  for title in ROLE_TITLES]
+_role_patterns = [(title, _isolated_pattern(title)) for title in ROLE_TITLES]
 
 _HEAD_OF_RE = re.compile(
     r'\bHead of ((?:[\w/-]+(?:[ \t]+(?!at\b|in\b|for\b|from\b|since\b|who\b|with\b|is\b|was\b)[\w/-]+){0,5}))',
@@ -570,7 +601,8 @@ def _extract_methods(text: str, dicts: EntityDictionaries) -> list[EntityMention
     """Extract methodology/technology mentions using curated dictionary."""
     if not dicts.method_variants:
         return []
-    return _extract_from_variants(text.lower(), dicts.method_variants, 'method', min_len=2)
+    return _extract_from_variants(text.lower(), dicts.method_variants, 'method',
+                                  min_len=2, check_negation=True)
 
 
 NCT_RE = re.compile(r'\b(NCT\d{8})\b')
@@ -626,7 +658,7 @@ def _extract_conferences(text: str, dicts: EntityDictionaries) -> list[EntityMen
     for variant, canonical in dicts.conference_variants.items():
         if len(variant) >= 4 or canonical in seen:
             continue
-        pattern = re.compile(r'\b' + re.escape(variant) + r'\b')
+        pattern = _isolated_pattern(variant, flags=0)
         match = pattern.search(text_lower)
         if match:
             before = text_lower[max(0, match.start() - 30):match.start()]
