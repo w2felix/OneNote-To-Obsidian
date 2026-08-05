@@ -39,6 +39,7 @@ EXTENSION_MAP = {
     '.docx': 'document',
     '.html': 'document',
     '.xlsx': 'tabular_data',
+    '.xls': 'tabular_data',
     '.csv': 'tabular_data',
     '.tsv': 'tabular_data',
     '.gif': 'skip',

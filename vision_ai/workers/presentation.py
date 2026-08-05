@@ -11,6 +11,12 @@ from vision_ai.vision_utils import pdf_to_images, pdf_page_count, encode_image, 
 
 logger = logging.getLogger(__name__)
 
+# Slide-text budget for the prompt. Raised from 12,000 once table and grouped
+# shape extraction landed: table-heavy decks went from ~9k to ~36k chars, and
+# the old cap silently dropped two thirds of them. 60,000 chars is roughly
+# 15k tokens, well within the model's context, and covers every deck observed.
+MAX_PROMPT_CHARS = 60000
+
 PPTX_PROMPT = """Analyze this slide content extracted from a presentation.
 
 Slide content:
@@ -70,9 +76,14 @@ class PresentationWorker(VisionWorker):
             return None
 
         slide_count = text.count('--- Slide ')
-        truncated = text[:12000]
-        if len(text) > 12000:
+        truncated = text[:MAX_PROMPT_CHARS]
+        if len(text) > MAX_PROMPT_CHARS:
             truncated += "\n[... truncated]"
+            logger.warning(
+                f"{filename}: slide text truncated from {len(text)} to "
+                f"{MAX_PROMPT_CHARS} chars; summary covers the first "
+                f"{truncated.count('--- Slide ')} of {slide_count} slides"
+            )
 
         prompt = PPTX_PROMPT.format(
             slide_text=truncated,
@@ -87,8 +98,36 @@ class PresentationWorker(VisionWorker):
             result.extra['slide_count'] = slide_count
             return result
         except Exception as e:
-            logger.error(f"API call failed for presentation {filename}: {e}")
+            logger.error(f"API call failed for presentation {filename}: {e}", exc_info=True)
             return None
+
+    def _shape_texts(self, shape) -> list[str]:
+        """Text from one shape, recursing into groups and tables.
+
+        Reading only top-level `has_text_frame` shapes misses three common
+        cases: grouped shapes (any diagram assembled from parts), tables (most
+        of the text on a comparison or selection slide), and SmartArt/charts
+        converted to groups. A table-heavy deck would otherwise extract as
+        empty and be skipped with no analysis.
+        """
+        texts: list[str] = []
+        # MSO_SHAPE_TYPE.GROUP == 6; compared numerically to avoid importing
+        # the enum, which python-pptx exposes at a version-dependent path.
+        if getattr(shape, "shape_type", None) == 6:
+            for child in shape.shapes:
+                texts.extend(self._shape_texts(child))
+            return texts
+        if getattr(shape, "has_text_frame", False):
+            for para in shape.text_frame.paragraphs:
+                text = para.text.strip()
+                if text:
+                    texts.append(text)
+        if getattr(shape, "has_table", False):
+            for row in shape.table.rows:
+                cells = [c.text.strip().replace("\n", " ") for c in row.cells]
+                if any(cells):
+                    texts.append(" | ".join(cells))
+        return texts
 
     def _extract_pptx_text(self, data: bytes) -> str:
         try:
@@ -98,16 +137,27 @@ class PresentationWorker(VisionWorker):
             for i, slide in enumerate(prs.slides, 1):
                 texts = []
                 for shape in slide.shapes:
-                    if shape.has_text_frame:
-                        for para in shape.text_frame.paragraphs:
-                            text = para.text.strip()
-                            if text:
-                                texts.append(text)
+                    try:
+                        texts.extend(self._shape_texts(shape))
+                    except Exception as e:
+                        # One malformed shape must not cost the whole deck.
+                        logger.warning(f"slide {i}: shape skipped ({e})")
+                if slide.has_notes_slide:
+                    notes = slide.notes_slide.notes_text_frame
+                    note_text = notes.text.strip() if notes is not None else ""
+                    if note_text:
+                        texts.append(f"[speaker notes] {note_text}")
                 if texts:
                     slides_text.append(f"--- Slide {i} ---\n" + '\n'.join(texts))
+            if not slides_text:
+                logger.warning(
+                    f"pptx contained no extractable text across "
+                    f"{len(prs.slides)} slide(s): likely an image-only deck; "
+                    f"no analysis will be written"
+                )
             return '\n\n'.join(slides_text)
         except Exception as e:
-            logger.warning(f"python-pptx extraction failed: {e}")
+            logger.warning(f"python-pptx extraction failed: {e}", exc_info=True)
             return ""
 
     def _analyze_pdf_presentation(self, data: bytes, filename: str,
