@@ -30,6 +30,15 @@ def _load_credentials():
     if os.environ.get('ANTHROPIC_API_KEY'):
         return
     try:
+        from vision_ai.credentials_loader import load_credentials as _load_from_toml
+        _load_from_toml()
+        if os.environ.get('ANTHROPIC_AUTH_TOKEN') and os.environ.get('ANTHROPIC_BASE_URL'):
+            return
+        if os.environ.get('ANTHROPIC_API_KEY'):
+            return
+    except Exception:
+        pass
+    try:
         import winreg
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, 'Environment', 0, winreg.KEY_READ)
         try:

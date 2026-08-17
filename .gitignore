@@ -5,6 +5,9 @@ obsidian_export/
 .sync_state.json
 **/.sync_state.json
 
+# Credentials (per-repo, machine-specific)
+.anthropic-credentials.toml
+
 # Python
 __pycache__/
 *.pyc

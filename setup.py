@@ -549,7 +549,15 @@ def main():
         '--tesseract-path', type=Path, default=None,
         help='Path to existing Tesseract installation folder (skips download)',
     )
+    parser.add_argument(
+        '--configure-auth', action='store_true',
+        help='Detect Anthropic auth backend (tux/foundry/direct) and write .anthropic-credentials.toml',
+    )
     args = parser.parse_args()
+
+    if args.configure_auth:
+        import configure_auth as _ca
+        sys.exit(_ca.main())
 
     print('=' * 60)
     print('  OneNote to Obsidian — Setup')
@@ -591,6 +599,19 @@ def main():
             print('\n  [!] Tesseract not found. Run later: python setup.py --setup-tesseract')
 
     setup_entities(force=args.update_entities)
+
+    # Auto-configure Anthropic auth if not already set up on this machine.
+    creds_file = Path(__file__).parent / '.anthropic-credentials.toml'
+    if not creds_file.exists():
+        section('Configuring Anthropic auth')
+        try:
+            import configure_auth as _ca
+            _ca.main()
+        except SystemExit:
+            pass
+        except Exception as e:
+            print(f'  [!] Auth setup skipped: {e}')
+
     verify()
 
     print('\n' + '=' * 60)
