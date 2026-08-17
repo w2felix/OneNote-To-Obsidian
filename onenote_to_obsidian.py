@@ -3081,6 +3081,11 @@ Write-Output "DONE"
                 except Exception as e:
                     print(f'\n  [!] Entity index generation failed: {e}')
 
+            # Write manifest of top-level synced folders so downstream tools
+            # (e.g. Claude agents) know which vault folders are owned by this
+            # pipeline and must be treated as read-only.
+            _write_synced_folders_manifest(args.output_dir, all_pages, args.vault_mode)
+
             # Summary
             by_type = {}
             for a in actions:
@@ -3103,6 +3108,29 @@ Write-Output "DONE"
         print(f'\n  Note: {len(errors)} page(s) had export errors (see above).')
 
     print('\nDone!')
+
+
+def _write_synced_folders_manifest(output_dir: Path, all_pages: list, vault_mode: str) -> None:
+    """Write _synced_folders.json listing top-level vault folders owned by this pipeline."""
+    import datetime
+    folders: set[str] = set()
+    for page in all_pages:
+        rel = compute_output_path(page, vault_mode)
+        top = Path(rel).parts[0] if Path(rel).parts else None
+        if top:
+            folders.add(top)
+    manifest = {
+        'generated': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
+        'description': (
+            'Top-level vault folders written by onenote_to_obsidian.py. '
+            'These are synced from OneNote and must be treated as read-only '
+            'by all downstream tools and agents.'
+        ),
+        'synced_folders': sorted(folders),
+    }
+    manifest_path = Path(output_dir) / '_synced_folders.json'
+    _write_text_safe(manifest_path, json.dumps(manifest, indent=2, ensure_ascii=False))
+    print(f'  Manifest written: {manifest_path} ({len(folders)} folders)')
 
 
 if __name__ == '__main__':

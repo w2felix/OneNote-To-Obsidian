@@ -57,21 +57,67 @@ def build_hgnc(src: Path, out: Path):
     print(f"  Written: {out.name} ({out.stat().st_size // 1024:,} KB)")
 
 
+# MONDO:0000001 is the root of actual diseases ("disease or disorder").
+# Sibling branches like MONDO:0021125 (disease characteristic) contain modifiers
+# such as "acquired", "congenital", "not rare", "restricted to specific location".
+# Historical bug: build_mondo indexed every MONDO CLASS, so those modifiers
+# ended up as valid disease labels and the downstream wikifier turned every
+# occurrence of the word "acquired" in prose into [[acquired]].
+_MONDO_DISEASE_ROOT = 'http://purl.obolibrary.org/obo/MONDO_0000001'
+
+# Extra guard: common English words that occasionally appear as MONDO synonyms
+# via edge cases (e.g. a description-derived synonym). Never accept these as
+# diseases regardless of ancestry.
+_DISEASE_KEY_STOPLIST = {
+    'acquired', 'congenital', 'inherited', 'sporadic',
+    'not rare', 'rare', 'common', 'not applicable',
+    'restricted to specific location', 'systemic',
+    'disease', 'condition', 'disorder', 'disease or disorder',
+    'benign', 'malignant',
+    'arms', 'read', 'age', 'mild', 'moderate', 'severe',
+}
+
+
+def _descendants_of(root: str, edges: list) -> set[str]:
+    """Return the set of MONDO node URLs whose is_a ancestry includes `root`."""
+    children: dict[str, list[str]] = {}
+    for e in edges:
+        if e.get('pred') == 'is_a':
+            children.setdefault(e['obj'], []).append(e['sub'])
+
+    seen: set[str] = {root}
+    frontier = [root]
+    while frontier:
+        cur = frontier.pop()
+        for child in children.get(cur, ()):
+            if child not in seen:
+                seen.add(child)
+                frontier.append(child)
+    return seen
+
+
 def build_mondo(src: Path, out: Path):
     print(f"Building disease dictionary from {src.name}  (this may take ~30s)...")
 
     with open(src, encoding='utf-8') as f:
         mondo = json.load(f)
 
-    # MONDO JSON-LD: graphs[0].nodes
+    # MONDO JSON-LD: graphs[0].nodes + graphs[0].edges
     graphs = mondo.get('graphs', [])
     if not graphs:
         print("ERROR: No 'graphs' key in mondo.json — wrong format?", file=sys.stderr)
         sys.exit(1)
 
     nodes = graphs[0].get('nodes', [])
+    edges = graphs[0].get('edges', [])
+
+    # Restrict to genuine diseases: nodes whose ancestry includes MONDO:0000001.
+    disease_urls = _descendants_of(_MONDO_DISEASE_ROOT, edges)
+
     diseases = {}
     skipped_obsolete = 0
+    skipped_off_branch = 0
+    skipped_stoplist = 0
 
     for node in nodes:
         if node.get('type') != 'CLASS':
@@ -79,6 +125,10 @@ def build_mondo(src: Path, out: Path):
 
         node_id = node.get('id', '')
         if 'MONDO_' not in node_id:
+            continue
+
+        if node_id not in disease_urls:
+            skipped_off_branch += 1
             continue
 
         meta = node.get('meta', {})
@@ -96,22 +146,29 @@ def build_mondo(src: Path, out: Path):
 
         entry = {'label': label, 'mondo_id': mondo_id}
 
-        # Register under lowercase label
+        # Register under lowercase label (unless it's a known-bad token).
         key = label.lower()
-        if key not in diseases:
+        if key in _DISEASE_KEY_STOPLIST:
+            skipped_stoplist += 1
+        elif key not in diseases:
             diseases[key] = entry
 
-        # Register all synonyms
+        # Register all synonyms with the same guards.
         for syn in meta.get('synonyms', []):
             val = syn.get('val', '').strip()
-            if val and len(val) >= 3:
-                syn_key = val.lower()
-                if syn_key not in diseases:
-                    diseases[syn_key] = entry
+            if not val or len(val) < 4:
+                continue
+            syn_key = val.lower()
+            if syn_key in _DISEASE_KEY_STOPLIST:
+                skipped_stoplist += 1
+                continue
+            if syn_key not in diseases:
+                diseases[syn_key] = entry
 
     out.write_text(json.dumps(diseases, ensure_ascii=False), encoding='utf-8')
     print(f"  {len(diseases):,} disease name/synonym entries "
-          f"({skipped_obsolete:,} obsolete terms skipped)")
+          f"({skipped_obsolete:,} obsolete, {skipped_off_branch:,} off-branch, "
+          f"{skipped_stoplist:,} stoplist)")
     print(f"  Written: {out.name} ({out.stat().st_size // 1024:,} KB)")
 
 
