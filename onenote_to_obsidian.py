@@ -812,12 +812,25 @@ def _convert_page_xml_inner(xml_path: Path, page_info: dict, skip_images: bool) 
     )
     # Rescue undetected code: consecutive escaped lines that look like R/Python code
     markdown = _rescue_code_blocks(markdown)
+    # Absorb multi-line function-call continuations that surround a fence
+    # (either dangling after `%>%` / `+` / `,`, or a call head opened just
+    # before a fence). Must run before adjacent-fence merging so the merge
+    # sees a maximally-inclusive block.
+    markdown = _absorb_fence_continuations(markdown)
+    # Collapse adjacent same-language fences that OneNote fragmented across
+    # empty or non-monospace paragraphs (common on long dplyr pipelines).
+    markdown = _merge_adjacent_fences(markdown)
     return markdown, images, has_ink
 
 
 _CODE_RESCUE_RE = re.compile(
-    r'\w+\s*<-\s'
-    r'|%>%'
+    # R assignment: `x <- ...` OR `x<-...` (tidyverse often omits the space).
+    r'\w+\s*<-'
+    # Also `)` or `]]` before `<-`: `Idents(seurat) <-`, `x[["k"]] <-`.
+    # Rescue runs after markdown escapes have been applied, so `]]` may
+    # appear as `\]\]` — accept both.
+    r'|\)\s*<-|(?:\]\]|\\\]\\\])\s*<-'
+    r'|%>%|\|>'   # magrittr pipe or base R native pipe
     r'|\bc\('
     r'|\blibrary\('
     r'|\bimport\s'
@@ -845,24 +858,98 @@ _CODE_RESCUE_RE = re.compile(
 )
 
 
-_CODE_LANG_R = re.compile(r'library\(|<-\s|%>%|ggplot\(|geom_|aes\(|dplyr::|tidyverse')
-_CODE_LANG_PYTHON = re.compile(r'^import\s|^from\s\w+\simport|def\s\w+\(|class\s\w+', re.MULTILINE)
-_CODE_LANG_BASH = re.compile(
-    r'^\s*(git|conda|mamba|pip|ssh|scp|cd|ls|mkdir|rm|cp|chmod|export|source|eval)\s',
+# Language detection: R is the default for this vault. A non-R language is
+# only chosen when the note author signals it explicitly (# lang: X or a
+# shebang) or when the block carries a strong structural cue for another
+# language (Python def/import, shell verbs, SQL, YAML, JSON).
+_LANG_HINT_RE = re.compile(
+    r'^\s*(?:#|//|--)\s*lang(?:uage)?\s*[:=]\s*([A-Za-z]+)',
+    re.IGNORECASE | re.MULTILINE,
+)
+_SHEBANG_RE = re.compile(r'^\s*#!\s*(?:/usr/bin/env\s+|\S*/)?(\w+)', re.MULTILINE)
+
+_CODE_LANG_PYTHON = re.compile(
+    r'^\s*(?:import\s+\w+'
+    r'|from\s+[\w.]+\s+import\b'
+    r'|def\s+\w+\s*\('
+    r'|class\s+\w+\s*[\(:])',
     re.MULTILINE,
 )
+_CODE_LANG_BASH = re.compile(
+    r'^\s*\$\s+\S'
+    r'|^\s*(?:git|conda|mamba|pip|ssh|scp|docker|kubectl|curl|wget|bash|sudo|apt|make|cmake|npm|jupyter|Rscript)\s',
+    re.MULTILINE,
+)
+_CODE_LANG_SQL = re.compile(
+    r'\bSELECT\b[\s\S]{1,200}?\bFROM\b'
+    r'|\b(?:INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|CREATE\s+(?:TABLE|VIEW|INDEX)|WITH\s+\w+\s+AS)\b',
+    re.IGNORECASE,
+)
+_CODE_LANG_YAML = re.compile(
+    r'\A(?:\s*(?:#[^\n]*\n|---\s*\n))*\s*[A-Za-z_][\w.-]*\s*:\s*(?:\S[^\n]*|\n\s+[-A-Za-z_])',
+)
+_CODE_LANG_JSON = re.compile(r'\A\s*[\[{][\s\S]*"[\w-]+"\s*:', re.DOTALL)
+
+_LANG_ALIASES = {
+    'py': 'python',
+    'python3': 'python',
+    'sh': 'bash',
+    'shell': 'bash',
+    'zsh': 'bash',
+    'ps1': 'powershell',
+    'js': 'javascript',
+    'ts': 'typescript',
+    'rscript': 'r',
+    'rlang': 'r',
+}
 
 
 def _detect_code_lang(lines: list[str]) -> str:
-    """Detect language from code buffer content."""
+    """Return the fenced-code language tag for a block of code lines.
+
+    Defaults to 'r' unless a different language is clearly signaled: either
+    an explicit `# lang: X` comment / shebang from the note author, or a
+    strong structural cue characteristic of another language.
+    """
     text = '\n'.join(lines)
-    if _CODE_LANG_R.search(text):
-        return 'r'
+
+    # Tier 1: explicit author hint (highest priority).
+    hint = _LANG_HINT_RE.search(text) or _SHEBANG_RE.search(text)
+    if hint:
+        lang = hint.group(1).lower()
+        return _LANG_ALIASES.get(lang, lang)
+
+    # Tier 2: strong non-R structural cues.
     if _CODE_LANG_PYTHON.search(text):
         return 'python'
     if _CODE_LANG_BASH.search(text):
         return 'bash'
-    return ''
+    if _CODE_LANG_SQL.search(text):
+        return 'sql'
+    if _CODE_LANG_YAML.match(text):
+        return 'yaml'
+    if _CODE_LANG_JSON.match(text):
+        return 'json'
+
+    # Tier 3: default. This vault is R-first.
+    return 'r'
+
+
+# A single line matching this is confident-enough R code (or shell) that we
+# rescue it into a fence on its own, so that wikification does not corrupt
+# identifiers that happen to collide with vault page names (e.g. CPTAC,
+# CEACAM5). Escaped underscores from _escape_md_text are tolerated because
+# the pattern doesn't rely on `_` boundaries.
+_STRONG_SINGLE_LINE_CODE_RE = re.compile(
+    r'\S+\s*<-\s*[\w.]+\s*\('           # x <- func(
+    r'|\S+\s*<-\s*c\('                  # x <- c(
+    r'|\)\s*<-\s*\S'                    # func(x) <- val (S4 replacement)
+    r'|\]\]\s*<-\s*\S'                  # x[["k"]] <- val (list assign)
+    r'|%>%|\|>'                         # a pipe means it's a pipeline
+    r'|\b\w+::\w+\s*\('                 # namespace call: pkg::func(
+    r'|^\s*(?:git|conda|mamba|pip|Rscript|docker|kubectl)\s+\w+',
+    re.MULTILINE,
+)
 
 
 def _rescue_code_blocks(markdown: str) -> str:
@@ -875,7 +962,7 @@ def _rescue_code_blocks(markdown: str) -> str:
     code_buf = []
 
     def _flush_code(buf):
-        if len(buf) >= 2:
+        if len(buf) >= 2 or (len(buf) == 1 and _STRONG_SINGLE_LINE_CODE_RE.search(buf[0])):
             lang = _detect_code_lang(buf)
             result.append(f'```{lang}')
             for ln in buf:
@@ -897,7 +984,14 @@ def _rescue_code_blocks(markdown: str) -> str:
             result.append(line)
             continue
 
-        if _CODE_RESCUE_RE.search(line) or (code_buf and _looks_like_continuation(line)):
+        # If the current buffer has an open paren/bracket/brace, any non-blank
+        # non-fence line is very likely a continuation. This catches 2-space
+        # indented dplyr / Seurat argument lists that no keyword heuristic
+        # would otherwise recognise.
+        buffer_open = code_buf and _bracket_balance('\n'.join(code_buf)) > 0
+        if (_CODE_RESCUE_RE.search(line)
+                or (code_buf and _looks_like_continuation(line))
+                or (buffer_open and line.strip())):
             code_buf.append(line)
         else:
             if code_buf:
@@ -908,6 +1002,163 @@ def _rescue_code_blocks(markdown: str) -> str:
     if code_buf:
         _flush_code(code_buf)
 
+    return '\n'.join(result)
+
+
+# Matches: ```<lang>\n<body>\n```  <blank-lines>  ```<same-lang>\n
+# The `\1` backreference forces the two fences to declare the same language,
+# so we never merge an R block into a Python block.
+_ADJACENT_FENCE_RE = re.compile(
+    r'```(\w*)\n([\s\S]*?)\n```[ \t]*\n(?:[ \t]*\n)+```\1[ \t]*\n',
+)
+
+
+def _merge_adjacent_fences(md: str) -> str:
+    """Collapse consecutive same-language fenced blocks separated by blanks."""
+    def _replace(m: re.Match) -> str:
+        return f'```{m.group(1)}\n{m.group(2)}\n'
+    prev = None
+    while prev != md:
+        prev = md
+        md = _ADJACENT_FENCE_RE.sub(_replace, md)
+    return md
+
+
+# Lines ending in these tokens are almost certainly the head of a multi-line
+# expression, not a complete statement. Trailing whitespace is tolerated.
+_LINE_CONTINUES_RE = re.compile(r'(?:,|\+|%>%|\|>|<-|=|\(|\[|\{|\|\||\&\&)\s*$')
+
+# Max distance in lines to search forward/backward when absorbing continuation
+# lines into a fence. Guardrail against runaway absorption on pathological input.
+_ABSORB_MAX_LINES = 30
+
+
+def _bracket_balance(text: str) -> int:
+    """Naive open-minus-close count for (), [], {}. Positive = more opens."""
+    return (
+        text.count('(') + text.count('[') + text.count('{')
+        - text.count(')') - text.count(']') - text.count('}')
+    )
+
+
+def _looks_like_code_continuation(line: str) -> bool:
+    """A line that reads as the middle or tail of a code expression."""
+    stripped = line.strip()
+    if not stripped:
+        return False
+    # Starts with a closing bracket, operator, or comma → definitely continuation.
+    if stripped[0] in ')]},+|&':
+        return True
+    # Named-argument form: `key = value`, `key = value,`
+    if re.match(r'^[\w.]+\s*=\s', stripped):
+        return True
+    # Deeply indented and containing at least one paren/operator token.
+    # OneNote often uses NBSP (U+00A0) for code indentation, so treat that
+    # the same as a leading space for continuation purposes.
+    if (line.startswith(('  ', '\t', '\xa0\xa0'))
+            and re.search(r'[(),+=]|%>%|::', stripped)):
+        return True
+    return False
+
+
+def _absorb_fence_continuations(md: str) -> str:
+    """Rescue orphan continuation lines around fenced code blocks.
+
+    Walks lines with an explicit `in_fence` state so `\\`\\`\\`` markers are
+    correctly identified as openers vs closers. Two operations:
+      - **Head absorb** (opener path): if a fence opens right after
+        non-fenced lines that look like the head of a code expression
+        (open paren, trailing operator), those lines are pulled into the
+        new fence.
+      - **Tail absorb** (closer path): if a fence's content ends with an
+        operator like `,`/`+`/`%>%` or has unbalanced brackets, subsequent
+        non-fence lines are absorbed into the fence until the expression
+        balances or a hard stop hits.
+    """
+    lines = md.split('\n')
+    n = len(lines)
+    result: list[str] = []
+    i = 0
+    in_fence = False
+    content_start = 0  # index into `result` where current fence's content begins
+
+    def _content_incomplete(content: str) -> bool:
+        if not content.strip():
+            return False
+        if _bracket_balance(content) > 0:
+            return True
+        last_line = content.rstrip('\n').split('\n')[-1]
+        return bool(_LINE_CONTINUES_RE.search(last_line))
+
+    while i < n:
+        line = lines[i]
+
+        if line.startswith('```'):
+            if not in_fence:
+                # === Opener. Try head-absorb first.
+                head_absorbed: list[str] = []
+                r = len(result) - 1
+                if r >= 0 and result[r].strip() == '':
+                    r -= 1
+                while r >= 0 and len(head_absorbed) < _ABSORB_MAX_LINES:
+                    cand = result[r]
+                    if cand.startswith('```') or cand.strip() == '':
+                        break
+                    if (_LINE_CONTINUES_RE.search(cand)
+                            or _bracket_balance(cand) > 0):
+                        head_absorbed.append(cand)
+                        r -= 1
+                        continue
+                    break
+                if head_absorbed:
+                    result = result[: r + 1]
+                    if result and result[-1].strip() != '':
+                        result.append('')
+                    result.append(line)  # opener
+                    content_start = len(result)
+                    for a in reversed(head_absorbed):
+                        result.append(_unescape_code_line(a))
+                else:
+                    result.append(line)
+                    content_start = len(result)
+                in_fence = True
+                i += 1
+                continue
+
+            # === Closer. Try tail-absorb before emitting the closer.
+            content = '\n'.join(result[content_start:])
+            if _content_incomplete(content):
+                absorbed: list[str] = []
+                j = i + 1
+                if j < n and lines[j].strip() == '':
+                    j += 1
+                while j < n and len(absorbed) < _ABSORB_MAX_LINES:
+                    nxt = lines[j]
+                    if nxt.startswith('```'):
+                        break
+                    if nxt.strip() == '':
+                        break
+                    if not _looks_like_code_continuation(nxt):
+                        break
+                    absorbed.append(nxt)
+                    combined = content + '\n' + '\n'.join(absorbed)
+                    if (_bracket_balance(combined) <= 0
+                            and not _LINE_CONTINUES_RE.search(absorbed[-1].strip())):
+                        j += 1
+                        break
+                    j += 1
+                if absorbed:
+                    for a in absorbed:
+                        result.append(_unescape_code_line(a))
+                    i = j - 1  # will be incremented below
+            result.append(line)  # closer
+            in_fence = False
+            i += 1
+            continue
+
+        # Regular (non-fence) line.
+        result.append(line)
+        i += 1
     return '\n'.join(result)
 
 
@@ -922,8 +1173,15 @@ def _looks_like_continuation(line: str) -> bool:
         return True
     if re.search(r'^\w[\w.]+\s*\(', stripped):
         return True
-    if re.search(r'^\s{4,}', line):
-        return True
+    # Deep indentation is a code cue only when the *content* itself is
+    # indented, not when a prose paragraph has any leading whitespace.
+    # NBSP (U+00A0) is included because OneNote uses it for code indentation.
+    indent = len(line) - len(line.lstrip(' \t\xa0'))
+    if indent >= 4 and stripped:
+        # But require that the line ALSO carry another code hint, otherwise
+        # a normal indented bullet body absorbs into a rescued code block.
+        if re.search(r'[<>=(){};]|::|%>%|\|>', stripped):
+            return True
     # Shell continuations: lines starting with common flags/args
     if re.search(r'^\s*(-\w|--\w)', stripped):
         return True
@@ -934,7 +1192,14 @@ def _looks_like_continuation(line: str) -> bool:
 
 
 def _unescape_code_line(line: str) -> str:
-    """Remove markdown escaping from a code line."""
+    """Remove markdown escaping from a code line.
+
+    Order matters: `_escape_md_text` doubled every backslash before
+    prefixing markdown-special chars, so we must undo the specific
+    backslash+char sequences BEFORE collapsing the remaining `\\\\` pairs,
+    otherwise `\\\\_` (an escaped backslash followed by escaped underscore
+    from an original `\\_` R token) would first be misread as `\\` + `\\_`.
+    """
     line = line.replace('\\#', '#')
     line = line.replace('\\_', '_')
     line = line.replace('\\*', '*')
@@ -943,6 +1208,9 @@ def _unescape_code_line(line: str) -> str:
     line = line.replace('\\`', '`')
     line = line.replace('\\>', '>')
     line = line.replace('\\<', '<')
+    line = line.replace('\\~', '~')   # R formulas, lambda `~ .` shorthand
+    # Restore literal backslashes last (regex escapes, Windows paths, R strings).
+    line = line.replace('\\\\', '\\')
     return line
 
 
@@ -975,25 +1243,51 @@ def _convert_oe_children(elem, ns, style_map, images, skip_images, indent) -> st
 
 
 def _group_code_lines(lines: list[str]) -> str:
-    """Group consecutive code-sentinel lines into fenced code blocks."""
+    """Group consecutive code-sentinel lines into fenced code blocks.
+
+    Blank lines between monospace paragraphs are absorbed into the code
+    block (they are almost always OneNote-inserted paragraph breaks inside
+    a logically single snippet), preventing spurious fence closures.
+    """
     result = []
     code_block = []
+    pending_blanks: list[str] = []
+
+    def _flush_code():
+        if code_block:
+            # Skip fences whose only content is blank lines. A trailing
+            # monospace-styled empty paragraph in OneNote would otherwise
+            # produce an empty ```r```/``` block that fragments code
+            # around it.
+            if not any(ln.strip() for ln in code_block):
+                code_block.clear()
+                return
+            lang = _detect_code_lang(code_block)
+            result.append(f'```{lang}')
+            result.extend(_unescape_code_line(ln) for ln in code_block)
+            result.append('```')
+            code_block.clear()
 
     for line in lines:
         if line.startswith(_CODE_LINE_SENTINEL):
-            code_block.append(line[len(_CODE_LINE_SENTINEL):])
-        else:
+            # Absorb any deferred blanks into the ongoing block (or drop them
+            # if we're just starting a new one).
             if code_block:
-                result.append('```')
-                result.extend(code_block)
-                result.append('```')
-                code_block = []
+                code_block.extend(pending_blanks)
+            pending_blanks.clear()
+            code_block.append(line[len(_CODE_LINE_SENTINEL):])
+        elif line == '':
+            # Defer: we don't yet know if this blank is a paragraph break or
+            # an intra-code gap in OneNote's rendering.
+            pending_blanks.append('')
+        else:
+            _flush_code()
+            result.extend(pending_blanks)
+            pending_blanks.clear()
             result.append(line)
 
-    if code_block:
-        result.append('```')
-        result.extend(code_block)
-        result.append('```')
+    _flush_code()
+    result.extend(pending_blanks)
 
     return '\n'.join(result)
 
@@ -1085,7 +1379,10 @@ def _convert_oe(oe_elem, ns, style_map, images, skip_images, indent, item_number
 
 
 _MD_ESCAPE_RE = re.compile(r'([\\`*_\[\]~#])')
-_MD_LINE_START_RE = re.compile(r'^(#{1,6}\s|>)', re.MULTILINE)
+# Only `>` (blockquote) needs a line-start escape here: `#` at line start was
+# already escaped to `\#` by _MD_ESCAPE_RE above, so the `#{1,6}` alternation
+# that used to live in this pattern was dead code.
+_MD_LINE_START_RE = re.compile(r'^(>)', re.MULTILINE)
 _HASH_SEP_RE = re.compile(r'^(\\#){4,}\s*$', re.MULTILINE)
 
 
@@ -1167,9 +1464,15 @@ def _process_html_node(node) -> str:
             is_monospace = False
         if is_monospace:
             raw_text = node.get_text()
-            if raw_text and '\n' not in raw_text:
-                return f'`{raw_text}`'
-            return raw_text or ''
+            if not raw_text:
+                return ''
+            if '\n' in raw_text:
+                # Multi-line monospace span → emit as a fenced code block so
+                # Obsidian renders it monospace instead of leaking the raw
+                # newlines back into prose formatting.
+                lang = _detect_code_lang(raw_text.split('\n'))
+                return f'\n```{lang}\n{raw_text}\n```\n'
+            return f'`{raw_text}`'
         text = ''.join(_process_html_node(child) for child in node.children)
         if 'font-weight:bold' in style or 'font-weight: bold' in style:
             text = f'**{text}**'
@@ -1324,7 +1627,8 @@ def _convert_table(table_elem, ns) -> str:
                 non_empty_cells.append(cell_text)
         if len(non_empty_cells) == 1 and _is_code_content(non_empty_cells[0]):
             code = non_empty_cells[0].strip()
-            return f'```\n{code}\n```'
+            lang = _detect_code_lang(code.split('\n'))
+            return f'```{lang}\n{code}\n```'
 
     has_header = table_elem.get('hasHeaderRow', 'false') == 'true'
     md_rows = []
@@ -1687,7 +1991,9 @@ def _inject_ai_tags(markdown: str, ai_tags: list[str]) -> str:
         closing_idx = len(lines) - 1
         while closing_idx > 0 and lines[closing_idx].strip() != '---':
             closing_idx -= 1
-        tag_lines = ['tags:'] + [f'  - "{tag}"' for tag in sorted(existing_tags | set(new_tags))]
+        # This branch runs only when no `tags:` section was found, so
+        # existing_tags is always empty here — union is a no-op.
+        tag_lines = ['tags:'] + [f'  - "{tag}"' for tag in sorted(new_tags)]
         for tl in reversed(tag_lines):
             lines.insert(closing_idx, tl)
 
@@ -2038,8 +2344,11 @@ def print_dry_run(actions: list[dict], state: dict, args=None):
         'ai-enrich': ('AI PROCESSING (tags/vision pending)', '[A]'),
     }
 
-    total_skip = len(state.get('pages', {})) - sum(
-        len(v) for k, v in by_type.items() if k != 'new'
+    total_skip = max(
+        0,
+        len(state.get('pages', {})) - sum(
+            len(v) for k, v in by_type.items() if k != 'new'
+        ),
     )
 
     for action_type, (label, marker) in type_labels.items():
@@ -2896,9 +3205,12 @@ def _handle_conflict(action, state, args, temp_dir, full_path, out_dir, rel_path
         f'> file changed since the last sync. Your edits are preserved in:\n'
         f'> `{full_path.name}`\n\n'
     )
-    # Insert after frontmatter
-    if markdown.startswith('---'):
-        end_idx = markdown.index('---', 3) + 3
+    # Insert after frontmatter. Guard against pages whose XML conversion
+    # produced an opening `---` but no closing one (ink-only / image-only
+    # pages) — otherwise str.index would abort the entire sync run.
+    close_idx = markdown.find('---', 3) if markdown.startswith('---') else -1
+    if close_idx != -1:
+        end_idx = close_idx + 3
         markdown = markdown[:end_idx] + '\n\n' + conflict_header + markdown[end_idx:]
     else:
         markdown = conflict_header + markdown
