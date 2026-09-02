@@ -78,13 +78,10 @@ class DocumentWorker(VisionWorker):
         return ""
 
     def _extract_pdf_text(self, pdf_bytes: bytes) -> str:
-        """Extract text from a PDF byte-stream.
+        """Extract text to prime the downstream vision-AI prompt.
 
-        Prefers pdf-inspector (Rust; layout-aware; ~10-30x faster than
-        pdfplumber on multi-column journal PDFs). Falls back to pdfplumber
-        if the library is missing or the parse throws. Text is used to
-        prime a downstream vision-AI prompt, so cleaner column handling
-        translates directly into fewer garbled prompts.
+        pdf-inspector preserves reading order on multi-column PDFs; pdfplumber
+        is the fallback when pdf-inspector is missing or throws.
         """
         try:
             import pdf_inspector as _pi
