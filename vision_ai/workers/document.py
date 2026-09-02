@@ -78,6 +78,25 @@ class DocumentWorker(VisionWorker):
         return ""
 
     def _extract_pdf_text(self, pdf_bytes: bytes) -> str:
+        """Extract text from a PDF byte-stream.
+
+        Prefers pdf-inspector (Rust; layout-aware; ~10-30x faster than
+        pdfplumber on multi-column journal PDFs). Falls back to pdfplumber
+        if the library is missing or the parse throws. Text is used to
+        prime a downstream vision-AI prompt, so cleaner column handling
+        translates directly into fewer garbled prompts.
+        """
+        try:
+            import pdf_inspector as _pi
+            result = _pi.extract_pages_markdown_bytes(pdf_bytes)
+            parts = [pm.markdown for pm in result.pages[:40] if pm.markdown]
+            if parts:
+                return "\n\n".join(parts)
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"pdf-inspector extraction failed, falling back: {e}")
+
         try:
             import pdfplumber
             from io import BytesIO
