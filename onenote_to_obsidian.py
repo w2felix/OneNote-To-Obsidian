@@ -1379,9 +1379,8 @@ def _convert_oe(oe_elem, ns, style_map, images, skip_images, indent, item_number
 
 
 _MD_ESCAPE_RE = re.compile(r'([\\`*_\[\]~#])')
-# Only `>` (blockquote) needs a line-start escape here: `#` at line start was
-# already escaped to `\#` by _MD_ESCAPE_RE above, so the `#{1,6}` alternation
-# that used to live in this pattern was dead code.
+# Only `>` (blockquote) needs a line-start escape here: `#` is already escaped
+# by _MD_ESCAPE_RE above.
 _MD_LINE_START_RE = re.compile(r'^(>)', re.MULTILINE)
 _HASH_SEP_RE = re.compile(r'^(\\#){4,}\s*$', re.MULTILINE)
 
@@ -2478,7 +2477,7 @@ def execute_actions(actions: list[dict], state: dict, args, temp_dir: Path,
             _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
                            page_id_map, all_page_names)
 
-        # Clean up old file when path has changed (section moved in OneNote)
+        # Remove the orphan file when a section move produced a new export path.
         old_path_rel = action.get('old_path')
         if old_path_rel and old_path_rel != rel_path and _path_exists_safe(full_path):
             old_full = out_dir / old_path_rel

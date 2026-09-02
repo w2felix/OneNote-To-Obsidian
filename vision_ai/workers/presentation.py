@@ -11,10 +11,8 @@ from vision_ai.vision_utils import pdf_to_images, pdf_page_count, encode_image, 
 
 logger = logging.getLogger(__name__)
 
-# Slide-text budget for the prompt. Raised from 12,000 once table and grouped
-# shape extraction landed: table-heavy decks went from ~9k to ~36k chars, and
-# the old cap silently dropped two thirds of them. 60,000 chars is roughly
-# 15k tokens, well within the model's context, and covers every deck observed.
+# Slide-text budget for the prompt. 60,000 chars (~15k tokens) covers
+# table-heavy decks with grouped shapes without exhausting the context.
 MAX_PROMPT_CHARS = 60000
 
 PPTX_PROMPT = """Analyze this slide content extracted from a presentation.

@@ -129,7 +129,8 @@ def _process_group(group: AttachmentGroup, images: dict[str, bytes],
         entry = cache.get('entries', {}).get(cache_key)
         return (group, entry['ai_note_file'])
 
-    # Clean up old file with bad characters in name
+    # Remove any cache entry whose file name contains Obsidian-invalid chars
+    # (#, [, ]); those files are unreachable via markdown links.
     old_entry = cache.get('entries', {}).get(cache_key)
     if old_entry:
         old_file = old_entry.get('ai_note_file', '')
