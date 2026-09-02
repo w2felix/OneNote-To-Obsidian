@@ -78,35 +78,9 @@ class DocumentWorker(VisionWorker):
         return ""
 
     def _extract_pdf_text(self, pdf_bytes: bytes) -> str:
-        """Extract text to prime the downstream vision-AI prompt.
-
-        pdf-inspector preserves reading order on multi-column PDFs; pdfplumber
-        is the fallback when pdf-inspector is missing or throws.
-        """
-        try:
-            import pdf_inspector as _pi
-            result = _pi.extract_pages_markdown_bytes(pdf_bytes)
-            parts = [pm.markdown for pm in result.pages[:40] if pm.markdown]
-            if parts:
-                return "\n\n".join(parts)
-        except ImportError:
-            pass
-        except Exception as e:
-            logger.debug(f"pdf-inspector extraction failed, falling back: {e}")
-
-        try:
-            import pdfplumber
-            from io import BytesIO
-            text_parts = []
-            with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
-                for page in pdf.pages[:20]:
-                    page_text = page.extract_text()
-                    if page_text:
-                        text_parts.append(page_text)
-            return '\n\n'.join(text_parts)
-        except Exception as e:
-            logger.debug(f"pdfplumber extraction failed: {e}")
-            return ""
+        """Extract text to prime the downstream vision-AI prompt."""
+        from vision_ai.vision_utils import pdf_text_bytes
+        return pdf_text_bytes(pdf_bytes)
 
     def _extract_docx_text(self, data: bytes) -> str:
         try:

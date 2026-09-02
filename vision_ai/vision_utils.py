@@ -60,6 +60,37 @@ def pdf_page_count(pdf_bytes: bytes) -> int:
     return count
 
 
+def pdf_text_bytes(pdf_bytes: bytes, max_pages: int = 40) -> str:
+    """Extract text from PDF bytes for prompting.
+
+    pdf-inspector preserves reading order on multi-column PDFs; pdfplumber
+    is the fallback when pdf-inspector is missing or throws.
+    """
+    try:
+        import pdf_inspector as _pi
+        result = _pi.extract_pages_markdown_bytes(pdf_bytes)
+        parts = [pm.markdown for pm in result.pages[:max_pages] if pm.markdown]
+        if parts:
+            return "\n\n".join(parts)
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.debug(f"pdf-inspector extraction failed, falling back: {e}")
+
+    try:
+        import pdfplumber
+        text_parts: list[str] = []
+        with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+            for page in pdf.pages[:min(max_pages, 20)]:
+                t = page.extract_text()
+                if t:
+                    text_parts.append(t)
+        return "\n\n".join(text_parts)
+    except Exception as e:
+        logger.debug(f"pdfplumber extraction failed: {e}")
+        return ""
+
+
 def pdf_metadata(pdf_bytes: bytes) -> dict:
     """Extract basic PDF metadata: page count, orientation, text density."""
     fitz = _init_fitz()
