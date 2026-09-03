@@ -177,9 +177,12 @@ def load_dictionaries() -> EntityDictionaries:
     if methods_path.exists():
         with open(methods_path, encoding='utf-8') as f:
             methods_data = yaml.safe_load(f) or {}
-        for canonical, variants in methods_data.items():
-            if isinstance(variants, list):
-                for v in variants:
+        for canonical, entry in methods_data.items():
+            if isinstance(entry, list):
+                for v in entry:
+                    dicts.method_variants[v.lower()] = canonical
+            elif isinstance(entry, dict):
+                for v in entry.get('variants', []):
                     dicts.method_variants[v.lower()] = canonical
         logger.debug(f"Loaded {len(dicts.method_variants)} method name variants")
 
