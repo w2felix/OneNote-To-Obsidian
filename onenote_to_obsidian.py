@@ -199,6 +199,43 @@ def _write_text_safe(path: Path, text: str, encoding: str = 'utf-8') -> None:
         f.write(text)
 
 
+def _retire_colliding_entity_stub(full_path: Path, output_dir) -> None:
+    """Delete a duplicate _entity_index/<type>/<Name>.md stub when a real
+    page with the same title has just been synced from OneNote.
+
+    Entity-index stubs are auto-generated placeholders the 2nd-brain ingest
+    pipeline creates whenever some note mentions an entity name not yet
+    indexed. If a real, synced OneNote page later shares that exact title,
+    the stub becomes a redundant, disconnected duplicate: Obsidian resolves
+    bare [[Name]] wikilinks by basename, so having both makes that
+    resolution ambiguous, and the stub is never the more useful of the two.
+
+    Deletion is scoped strictly to files under _entity_index/, matched only
+    on an exact basename, and is a pure no-op if _entity_index/ isn't found
+    at the expected location — this must never affect synced content or
+    block a sync run.
+    """
+    entity_index_root = Path(output_dir) / '_entity_index'
+    if not entity_index_root.is_dir():
+        return
+
+    stem = full_path.stem
+    try:
+        type_dirs = [d for d in entity_index_root.iterdir() if d.is_dir()]
+    except OSError:
+        return
+
+    for type_dir in type_dirs:
+        stub_path = type_dir / f'{stem}.md'
+        if not stub_path.exists():
+            continue
+        try:
+            stub_path.unlink()
+            safe_print(f'  [entity-index] retired duplicate stub: {stub_path.relative_to(Path(output_dir))}')
+        except OSError as exc:
+            safe_print(f'  [entity-index] could not retire stub {stub_path.name}: {exc}')
+
+
 def _read_text_safe(path: Path, encoding: str = 'utf-8') -> str:
     with open(_win_safe_path(path), encoding=encoding) as f:
         return f.read()
@@ -2879,6 +2916,7 @@ def _handle_enrich(action, state, args, full_path):
 
     if changed:
         _write_text_safe(full_path, markdown)
+        _retire_colliding_entity_stub(full_path, args.output_dir)
     # Update state hash (vision AI may have modified the file via callout injection)
     if changed or args.vision_ai:
         state['pages'][key]['content_hash'] = file_hash(full_path)
@@ -3060,6 +3098,7 @@ def _handle_export(action, state, args, temp_dir, full_path, out_dir, rel_path,
     # Write markdown file
     _mkdir_safe(full_path.parent, exist_ok=True)
     _write_text_safe(full_path, markdown)
+    _retire_colliding_entity_stub(full_path, args.output_dir)
 
     # Write images
     if images:
