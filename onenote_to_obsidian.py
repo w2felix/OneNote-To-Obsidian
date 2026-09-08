@@ -2607,9 +2607,14 @@ def _init_taxonomy(vault_root: Path) -> None:
         return
     try:
         data = json.loads(manifest_path.read_text(encoding='utf-8'))
+        if not isinstance(data, dict):
+            safe_print(f'  [taxonomy] unexpected schema in {manifest_path.name} '
+                       f'(root is {type(data).__name__}, expected object); '
+                       f'domain inference disabled.')
+            return
         _VALID_DOMAINS = frozenset(data.get('valid_domains') or [])
         _DOMAIN_ALIASES = dict(data.get('domain_aliases') or {})
-    except (OSError, json.JSONDecodeError, TypeError) as e:
+    except (OSError, json.JSONDecodeError, TypeError, AttributeError) as e:
         safe_print(f'  [taxonomy] failed to load {manifest_path.name}: {e}; '
                    f'domain inference disabled.')
 
