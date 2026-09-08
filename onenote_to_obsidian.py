@@ -2587,6 +2587,43 @@ def _handle_keep_obsidian(action, state, args, full_path, rel_path):
         state['pages'][key]['vision_att_hash'] = action['entry']['vision_att_hash']
 
 
+_VALID_DOMAINS: frozenset[str] = frozenset()
+_DOMAIN_ALIASES: dict[str, str] = {}
+
+
+def _init_taxonomy(vault_root: Path) -> None:
+    """Load canonical domain vocabulary from ``<vault>/_taxonomy.json``.
+
+    The vault is the single source of truth (written by 2nd-brain's
+    audit_frontmatter reconciler from vault_core/domains.py). No fallback:
+    if the file is missing or malformed, domain inference is disabled and
+    frontmatter is written without a domain field.
+    """
+    global _VALID_DOMAINS, _DOMAIN_ALIASES
+    manifest_path = Path(vault_root) / '_taxonomy.json'
+    if not manifest_path.exists():
+        safe_print(f'  [taxonomy] {manifest_path.name} not found in vault; '
+                   f'domain inference disabled for this run.')
+        return
+    try:
+        data = json.loads(manifest_path.read_text(encoding='utf-8'))
+        _VALID_DOMAINS = frozenset(data.get('valid_domains') or [])
+        _DOMAIN_ALIASES = dict(data.get('domain_aliases') or {})
+    except (OSError, json.JSONDecodeError, TypeError) as e:
+        safe_print(f'  [taxonomy] failed to load {manifest_path.name}: {e}; '
+                   f'domain inference disabled.')
+
+
+def _canonical_domain(raw: str) -> str:
+    """Normalize a proposed domain to canonical; '' if not resolvable."""
+    if not raw or not _VALID_DOMAINS:
+        return ''
+    key = raw.strip().lower()
+    if key in _VALID_DOMAINS:
+        return key
+    return _DOMAIN_ALIASES.get(key, '')
+
+
 def _infer_type_and_domain(notebook: str, section: str, tags: list[str],
                            entities: dict) -> tuple[str, str]:
     """Infer note type and domain from metadata.
@@ -2631,7 +2668,7 @@ def _infer_type_and_domain(notebook: str, section: str, tags: list[str],
                       'small-molecule', 'hit-identification', 'lead-optimization'}
 
     if tags_set & adc_tags:
-        domain = 'adcs'
+        domain = 'adc'
     elif tags_set & comp_bio_tags:
         domain = 'computational-biology'
     elif tags_set & ai_tags:
@@ -2639,7 +2676,7 @@ def _infer_type_and_domain(notebook: str, section: str, tags: list[str],
     elif tags_set & drug_disc_tags:
         domain = 'drug-discovery'
     elif tags_set & onco_tags:
-        domain = 'immuno-oncology'
+        domain = 'tumor-immunology'
 
     # Entity-based fallback
     if not domain:
@@ -2650,7 +2687,7 @@ def _infer_type_and_domain(notebook: str, section: str, tags: list[str],
         ai_methods = {'deep learning', 'machine learning', 'neural network'}
 
         if methods & adc_methods:
-            domain = 'adcs'
+            domain = 'adc'
         elif methods & comp_methods:
             domain = 'computational-biology'
         elif methods & ai_methods:
@@ -2659,11 +2696,17 @@ def _infer_type_and_domain(notebook: str, section: str, tags: list[str],
     # Section-based fallback
     if not domain:
         if 'adc' in sec_lower or 'ic adc' in sec_lower:
-            domain = 'adcs'
+            domain = 'adc'
         elif 'omics' in nb_lower or 'pipeline' in sec_lower or 'bioinformatics' in sec_lower:
             domain = 'computational-biology'
         elif 'conference' in nb_lower:
             domain = 'oncology'
+
+    # Final canonicalization via shared taxonomy (drops any drift that slipped through).
+    if domain:
+        canon = _canonical_domain(domain)
+        if canon:
+            domain = canon
 
     return note_type, domain
 
@@ -3289,6 +3332,11 @@ def main():
     print('=' * 60)
     print('  OneNote to Obsidian Sync')
     print('=' * 60)
+
+    # Load canonical domain taxonomy from the vault (single source of truth,
+    # kept fresh by 2nd-brain's audit_frontmatter reconciler). No fallback —
+    # if the manifest is missing, domain inference is disabled for this run.
+    _init_taxonomy(Path(args.output_dir))
 
     # Entity extraction is on by default — warn and disable if dictionaries not built
     if not args.no_entities:
