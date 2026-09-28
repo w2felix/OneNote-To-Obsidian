@@ -1,8 +1,10 @@
 """Anthropic API client singleton with credential loading and retry logic."""
 
 import os
+import sys
 import time
 import logging
+from pathlib import Path
 from typing import Optional
 
 from vision_ai import rate_limiter
@@ -11,9 +13,35 @@ logger = logging.getLogger(__name__)
 
 _client = None
 
-# Model names - can be overridden via environment variables
-VISION_MODEL = os.environ.get("VISION_MODEL", "claude-sonnet-4-6")
-TAGGER_MODEL = os.environ.get("TAGGER_MODEL", "claude-haiku-4-5-20251001")
+
+def _sibling_model_defaults():
+    """Read model ID defaults from the sibling 2nd-brain repo's vault_core.config,
+    if that repo is present, so both repos track the same model IDs instead of
+    drifting independently. Returns (sonnet, haiku) or (None, None).
+
+    vault_core/__init__.py does absolute `from vault_core.config import ...`,
+    so `pipeline/` itself (not the 2nd-brain repo root) must be on sys.path
+    for `vault_core` to resolve as a top-level package.
+    """
+    sib_pipeline = Path(__file__).resolve().parents[2] / "2nd-brain" / "pipeline"
+    if not (sib_pipeline / "vault_core" / "config.py").exists():
+        return None, None
+    sib_str = str(sib_pipeline)
+    if sib_str not in sys.path:
+        sys.path.insert(0, sib_str)
+    try:
+        from vault_core import config as hub_config
+        return hub_config.MODEL_SONNET, hub_config.MODEL_HAIKU
+    except Exception:
+        return None, None
+
+
+_default_sonnet, _default_haiku = _sibling_model_defaults()
+
+# Model names - env vars take precedence, then the sibling repo's config,
+# then these literals for standalone use without 2nd-brain present.
+VISION_MODEL = os.environ.get("VISION_MODEL") or _default_sonnet or "claude-sonnet-5"
+TAGGER_MODEL = os.environ.get("TAGGER_MODEL") or _default_haiku or "claude-haiku-4-5-20251001"
 
 RETRY_ATTEMPTS = 3
 RETRY_BASE_DELAY = 2.0

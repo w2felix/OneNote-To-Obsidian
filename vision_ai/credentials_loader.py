@@ -1,11 +1,14 @@
 """Per-repo Anthropic credential loader.
 
-Reads a gitignored `.anthropic-credentials.toml` at the repo root. Supports
-tux, foundry, anthropic (direct), and google_vertex (placeholder). Injects
-resolved credentials into os.environ so downstream code that reads
-ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY continues to work.
+Delegates to the sibling `2nd-brain` repo's
+`pipeline.vault_core.credentials_loader` when that repo is present alongside
+this one - one canonical `.anthropic-credentials.toml` and tux-probe
+implementation for the machine, instead of a second copy that can drift out
+of sync. Falls back to the local implementation below when the sibling repo
+isn't importable, so this repo still works standalone (e.g. cloned without
+`2nd-brain` present).
 
-Detection order when active_provider = "auto":
+Local-fallback detection order when active_provider = "auto":
   1. Existing process env
   2. Tux daemon reachable at its configured base_url
   3. Foundry section with non-empty auth_token
@@ -29,6 +32,29 @@ except ImportError:
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CREDS_FILE = REPO_ROOT / ".anthropic-credentials.toml"
+_SIBLING_2ND_BRAIN = REPO_ROOT.parent / "2nd-brain"
+
+
+def _hub():
+    """Return the sibling 2nd-brain repo's credentials_loader module, or None.
+
+    vault_core/__init__.py does absolute `from vault_core.config import ...`,
+    so `pipeline/` itself (not the 2nd-brain repo root) must be on sys.path
+    for `vault_core` to resolve as a top-level package - matching how
+    2nd-brain's own scripts import it (see pipeline/tools/check_vault_paths.py).
+    """
+    sib_pipeline = _SIBLING_2ND_BRAIN / "pipeline"
+    hub_file = sib_pipeline / "vault_core" / "credentials_loader.py"
+    if not hub_file.exists():
+        return None
+    sib_str = str(sib_pipeline)
+    if sib_str not in sys.path:
+        sys.path.insert(0, sib_str)
+    try:
+        from vault_core import credentials_loader as hub_loader
+        return hub_loader
+    except Exception:
+        return None
 
 
 def _read_toml() -> dict:
@@ -41,7 +67,7 @@ def _read_toml() -> dict:
         return {}
 
 
-def _tux_reachable(base_url: str, timeout: float = 0.5) -> bool:
+def _tux_reachable(base_url: str, timeout: float = 3.0) -> bool:
     if not base_url:
         return False
     probe = base_url.rstrip("/") + "/status"
@@ -75,7 +101,7 @@ def _apply(base_url, auth_token, api_key):
         os.environ["ANTHROPIC_API_KEY"] = api_key
 
 
-def load_credentials() -> str:
+def _load_credentials_local() -> str:
     if os.environ.get("ANTHROPIC_AUTH_TOKEN") and os.environ.get("ANTHROPIC_BASE_URL"):
         return "env"
     if os.environ.get("ANTHROPIC_API_KEY"):
@@ -114,7 +140,7 @@ def load_credentials() -> str:
     return "none"
 
 
-def detect_available() -> dict:
+def _detect_available_local() -> dict:
     cfg = _read_toml()
     tux_section = cfg.get("tux") or {}
     tux_url = tux_section.get("base_url") or "http://127.0.0.1:18080"
@@ -133,7 +159,35 @@ def detect_available() -> dict:
     }
 
 
+def load_credentials() -> str:
+    """Resolve credentials and inject into os.environ. Returns provider name used.
+
+    Delegates to the sibling 2nd-brain repo's loader when present, so both
+    repos read the same .anthropic-credentials.toml and share one
+    tux-reachability implementation. Falls back to the local implementation
+    above when that repo isn't available.
+    """
+    hub = _hub()
+    if hub is not None:
+        try:
+            return hub.load_credentials()
+        except Exception:
+            pass
+    return _load_credentials_local()
+
+
+def detect_available() -> dict:
+    hub = _hub()
+    if hub is not None:
+        try:
+            return hub.detect_available()
+        except Exception:
+            pass
+    return _detect_available_local()
+
+
 if __name__ == "__main__":
     print(f"Credentials file: {CREDS_FILE} (exists={CREDS_FILE.exists()})")
+    print(f"Sibling 2nd-brain hub available: {_hub() is not None}")
     print(f"Active provider: {load_credentials()}")
     print(json.dumps(detect_available(), indent=2))
