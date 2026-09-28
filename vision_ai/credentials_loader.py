@@ -70,7 +70,11 @@ def _read_toml() -> dict:
 def _tux_reachable(base_url: str, timeout: float = 3.0) -> bool:
     if not base_url:
         return False
-    probe = base_url.rstrip("/") + "/status"
+    # /status accepts the TCP connection but never responds on this tux
+    # build, so it burns the full timeout on every probe even when tux is
+    # completely healthy. /v1/models answers in milliseconds with no auth
+    # required and is what actually indicates the proxy can serve requests.
+    probe = base_url.rstrip("/") + "/v1/models"
     try:
         with urllib.request.urlopen(probe, timeout=timeout) as r:
             return True
