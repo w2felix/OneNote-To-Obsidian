@@ -67,6 +67,26 @@ FALSE_POSITIVE_GENES = {
     # Bioinformatics abbreviations — GRN is almost always "gene regulatory network"
     # in this vault's computational biology / oncology context, not progranulin
     'GRN',
+    # File format and LLM family. Both are real HGNC symbols, which is why the
+    # <=3-char context check does not stop them: that check only asks whether
+    # biomedical words sit within 100 characters, and in a paper note they always
+    # do. Measured across the vault before adding these: PDF was asserted as a
+    # gene in 35 notes and every occurrence was "Local PDF:", "PDF extraction" or
+    # "PDF content"; GPT in 5 notes, all of them GPT-4o / GPT-4.1 / GPT-5.6 or a
+    # "small GPT training script". Neither had a single occurrence in its gene
+    # sense (peptide deformylase; glutamic-pyruvate transaminase, i.e. ALT).
+    #
+    # Deliberately NOT added, having checked the same way, because the gene sense
+    # is live in this vault and a denial would lose real signal:
+    #   TF  — split. "Tissue Factor (TF)" and "TF-directed ADC" name a real ADC
+    #         target (Adcendo, ADCE-T02) alongside "TF regulon" / "kinase-TF-target"
+    #         meaning transcription factor. Needs context disambiguation, not a
+    #         denylist. Note HGNC TF is transferrin, so even the tissue-factor
+    #         sense maps to the wrong symbol here; F3 is tissue factor.
+    #   APC — majority real gene ("APC-mutant colorectal cancers", "APC (COAD/READ)",
+    #         "APC knockdown"), mixed with anaphase-promoting complex (APC/C) and
+    #         antigen-presenting cell.
+    'PDF', 'GPT',
     'ACE', 'BIN', 'ADD', 'BIG', 'BIT', 'BOX', 'BUS', 'CAR', 'CAT', 'COG',
     'COW', 'CRY', 'CUP', 'DAD', 'DAY', 'DIG', 'DIM', 'DOG', 'DOT', 'DRY',
     'DUG', 'EAR', 'EAT', 'EGG', 'ERA', 'EVE', 'EYE', 'FAD', 'FAT', 'FEW',

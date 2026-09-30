@@ -27,8 +27,30 @@ entity_data/mondo.json
 entity_data/hgnc_genes.json
 entity_data/mondo_diseases.json
 
-# Entity data YAMLs (hand-curated, local only — rebuild with setup.py --update-entities)
+# Entity data YAMLs: hand-curated and CONFIDENTIAL. Excluded deliberately and
+# permanently, not as a convenience. They hold internal compound codes, internal
+# department and site names, and curated commercial intelligence on companies and
+# drugs, none of which may reach a public remote. Do not add them, and do not
+# "fix" this rule by tracking them.
+#
+# NOT RECOVERABLE BY REBUILD. An earlier version of this comment said to rebuild
+# with `setup.py --update-entities`; that flag only re-downloads the public
+# ontology sources above (hgnc_complete_set.tsv, mondo.json) and never writes
+# these files. There is no code path that regenerates hand-curated variants, so
+# `git clone` plus setup leaves you with the dictionaries absent, and losing them
+# loses the curation outright.
+#
+# Because git is not the backup here, these need one out of band. Measured at the
+# time of writing: companies.yaml 787 lines, drugs.yaml 1356, methods.yaml 223,
+# cell_lines.yaml 189, tag_vocabulary.yaml 138, pathways.yaml 131,
+# clinical_trials.yaml 110, conferences.yaml 105, dictionary_pending.yaml 78,
+# departments.yaml 56, internal_compounds.yaml 23.
+#
+# dictionary_denylist.yaml is the one exception and IS tracked: it carries no
+# confidential data, only a list of terms that must never become entries, and it
+# is the guard that stops auto-extension from reintroducing curated removals.
 entity_data/*.yaml
+!entity_data/dictionary_denylist.yaml
 
 # Claude Code tooling
 .claude/

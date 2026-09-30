@@ -46,6 +46,8 @@ variants:
   - intercept      # regression intercept -> Intercept Pharmaceuticals
   - myriad         # "a myriad of" -> Myriad Genetics
   - recursion      # the CS concept -> Recursion Pharmaceuticals
+  - together       # the English adverb -> Together AI; was a live variant in
+                   # companies.yaml and reached 5 notes in one sweep
   # Forward guards: common words that are also real company names
   - generate       # the verb -> Generate Biomedicines
   - meta           # "meta-analysis" -> Meta
