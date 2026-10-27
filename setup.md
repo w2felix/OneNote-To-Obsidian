@@ -96,6 +96,12 @@ The token is a Palantir JWT. The script sends it as `Authorization: Bearer <toke
 
 Restart your terminal after setting variables.
 
+**Models:** you don't pick one. The pipeline uses the newest Sonnet (vision) and Haiku (tagging) that your endpoint lists, resolved on the first AI call of each run. `python setup.py` prints what resolves on your machine. To pin a version, set `VISION_MODEL` and/or `TAGGER_MODEL`:
+
+```powershell
+[Environment]::SetEnvironmentVariable("VISION_MODEL", "claude-sonnet-5-5", "User")
+```
+
 ---
 
 ## Step 4: OneNote

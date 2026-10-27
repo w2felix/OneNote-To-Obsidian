@@ -488,6 +488,25 @@ def setup_entities(force: bool):
         print('\n  Entity dictionaries ready.')
 
 
+# ── Claude models ────────────────────────────────────────────────────────────
+
+def report_models():
+    """Show which Claude models the pipeline will use (resolved from the endpoint)."""
+    section('Claude models')
+    try:
+        from vision_ai.client import get_vision_model, get_tagger_model
+        for label, var, getter in (
+            ('Vision AI (Sonnet)', 'VISION_MODEL', get_vision_model),
+            ('Tagging + entities (Haiku)', 'TAGGER_MODEL', get_tagger_model),
+        ):
+            pinned = ' (pinned by ' + var + ')' if os.environ.get(var) else ''
+            print(f'  {label}: {getter()}{pinned}')
+        print('  Newest models on the endpoint are used automatically.')
+        print('  To pin a version, set VISION_MODEL / TAGGER_MODEL.')
+    except Exception as e:
+        print(f'  [!] Could not resolve models: {e}')
+
+
 # ── Verification ─────────────────────────────────────────────────────────────
 
 def verify():
@@ -612,6 +631,7 @@ def main():
         except Exception as e:
             print(f'  [!] Auth setup skipped: {e}')
 
+    report_models()
     verify()
 
     print('\n' + '=' * 60)

@@ -249,16 +249,27 @@ python tools/fix_export.py             # apply
 
 Fixes: HTML entities, false disease wikilinks, OneNote citation format, unescaped code blocks, gene alias normalization, duplicate entity index files.
 
+## Model Selection
+
+The pipeline uses the newest Sonnet (vision) and Haiku (tagging, entity extraction) that your API endpoint lists. The lookup happens once per run, on the first AI call. No model IDs need updating when a new version ships.
+
+| Variable | Overrides | Default |
+|----------|-----------|---------|
+| `VISION_MODEL` | Model for `--vision-ai` | Newest `claude-sonnet-*` on the endpoint |
+| `TAGGER_MODEL` | Model for `--ai-tags` and LLM entity extraction | Newest `claude-haiku-*` on the endpoint |
+
+If the endpoint's model list can't be read, a warning is logged and built-in fallback IDs are used. `python setup.py` prints the models that resolve on your machine. The model used for each attachment is recorded in its `vision_model:` frontmatter field.
+
 ## API Cost Breakdown
 
 | Task | Model | Trigger | Input/call | Output/call |
 |------|-------|---------|------------|-------------|
-| Image analysis | Sonnet 4.6 | `--vision-ai` | ~2K-25K tokens | ~500-2K tokens |
-| Ink transcription | Sonnet 4.6 | `--vision-ai` + ink | ~2K-8K tokens | ~500-2K tokens |
-| Tagging + entity extraction | Haiku 4.5 | `--ai-tags` | ~1.1K tokens | ~200 tokens |
-| Tabular data | Sonnet 4.6 | `--vision-ai` + XLSX/CSV | ~800 tokens | ~300 tokens |
+| Image analysis | Sonnet (newest) | `--vision-ai` | ~2K-25K tokens | ~500-2K tokens |
+| Ink transcription | Sonnet (newest) | `--vision-ai` + ink | ~2K-8K tokens | ~500-2K tokens |
+| Tagging + entity extraction | Haiku (newest) | `--ai-tags` | ~1.1K tokens | ~200 tokens |
+| Tabular data | Sonnet (newest) | `--vision-ai` + XLSX/CSV | ~800 tokens | ~300 tokens |
 
-### Estimated costs (~800 pages, ~500 image groups)
+### Estimated costs (~800 pages, ~500 image groups; measured on earlier model versions, so newer models may differ)
 
 | Feature | API calls | Est. cost |
 |---------|-----------|-----------|
