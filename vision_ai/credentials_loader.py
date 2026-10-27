@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import sys
 import json
+import time
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -67,21 +68,35 @@ def _read_toml() -> dict:
         return {}
 
 
-def _tux_reachable(base_url: str, timeout: float = 3.0) -> bool:
-    if not base_url:
-        return False
+def _tux_probe_once(base_url: str, timeout: float) -> bool:
     # /status accepts the TCP connection but never responds on this tux
     # build, so it burns the full timeout on every probe even when tux is
     # completely healthy. /v1/models answers in milliseconds with no auth
     # required and is what actually indicates the proxy can serve requests.
     probe = base_url.rstrip("/") + "/v1/models"
     try:
-        with urllib.request.urlopen(probe, timeout=timeout) as r:
+        with urllib.request.urlopen(probe, timeout=timeout) as _:
             return True
     except urllib.error.HTTPError:
         return True
     except (urllib.error.URLError, TimeoutError, ConnectionError, OSError):
         return False
+
+
+def _tux_reachable(base_url: str, timeout: float = 3.0, retry_delays: tuple = (1.5, 3.0)) -> bool:
+    # Mirrors the hub's retry policy (pipeline/vault_core/credentials_loader.py)
+    # so this local fallback stays exactly as resilient to a mid-restart tux
+    # daemon as the hub path, instead of silently regressing to zero retries
+    # whenever _hub() can't be resolved.
+    if not base_url:
+        return False
+    if _tux_probe_once(base_url, timeout):
+        return True
+    for delay in retry_delays:
+        time.sleep(delay)
+        if _tux_probe_once(base_url, timeout):
+            return True
+    return False
 
 
 def _winreg_get(name: str) -> Optional[str]:
