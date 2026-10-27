@@ -3028,7 +3028,7 @@ _INK_SECTION_HEADER = '## Handwritten Notes'
 def _transcribe_ink_via_vision(pdf_path: Path, page_name: str, section_path: str) -> str | None:
     """Use Claude Vision to transcribe handwritten content from a rendered page PDF."""
     from vision_ai.vision_utils import pdf_to_images, encode_image, build_vision_message
-    from vision_ai.client import api_call_with_retry, VISION_MODEL
+    from vision_ai.client import api_call_with_retry, get_vision_model
 
     pdf_bytes = _read_bytes_safe(pdf_path)
     try:
@@ -3054,7 +3054,7 @@ def _transcribe_ink_via_vision(pdf_path: Path, page_name: str, section_path: str
 
     messages = build_vision_message(encoded, prompt)
     try:
-        response = api_call_with_retry(messages, max_tokens=4096, model=VISION_MODEL)
+        response = api_call_with_retry(messages, max_tokens=4096, model=get_vision_model())
         return response.strip() if response else None
     except Exception as e:
         safe_print(f'\n  [!] Ink vision transcription failed for {page_name}: {e}', file=sys.stderr)

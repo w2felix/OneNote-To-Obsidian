@@ -6,7 +6,7 @@ import logging
 import re
 from pathlib import Path
 
-from vision_ai.client import api_call_with_retry, TAGGER_MODEL
+from vision_ai.client import api_call_with_retry, get_tagger_model
 
 logger = logging.getLogger(__name__)
 MIN_WORD_COUNT = 50
@@ -171,7 +171,7 @@ Content:
             messages=[{"role": "user", "content": user_message}],
             system=SYSTEM_PROMPT,
             max_tokens=256,
-            model=TAGGER_MODEL,
+            model=get_tagger_model(),
         )
 
         # Parse JSON array from response

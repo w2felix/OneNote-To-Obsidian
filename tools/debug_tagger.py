@@ -10,7 +10,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from vision_ai.client import get_client, TAGGER_MODEL
+from vision_ai.client import get_client, get_tagger_model
 from entities.llm_extractor import COMBINED_SYSTEM_PROMPT, MAX_TOKENS, _clean_json_response
 
 PAGE_PATH = os.path.join(
@@ -45,7 +45,7 @@ Content:
 
     client = get_client()
     response = client.messages.create(
-        model=TAGGER_MODEL,
+        model=get_tagger_model(),
         max_tokens=max_tokens,
         messages=[{"role": "user", "content": user_message}],
         system=COMBINED_SYSTEM_PROMPT,

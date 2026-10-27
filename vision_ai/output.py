@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from vision_ai.client import VISION_MODEL
+from vision_ai.client import get_vision_model
 from vision_ai.workers.base import AnalysisResult
 
 logger = logging.getLogger(__name__)
@@ -97,7 +97,7 @@ def _build_frontmatter(result: AnalysisResult, group, model: str = None) -> str:
     lines.append('source_files:')
     for f in group.filenames:
         lines.append(f'  - "{f}"')
-    lines.append(f'vision_model: {model or VISION_MODEL}')
+    lines.append(f'vision_model: {model or get_vision_model()}')
     lines.append(f'analyzed: {datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}')
     if group.context:
         ctx_escaped = group.context.split('\n')[0].strip()

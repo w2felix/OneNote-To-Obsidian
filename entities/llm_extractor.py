@@ -8,7 +8,7 @@ import json
 import logging
 import re
 
-from vision_ai.client import api_call_with_retry, TAGGER_MODEL
+from vision_ai.client import api_call_with_retry, get_tagger_model
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +130,7 @@ Content:
         messages=messages,
         system=COMBINED_SYSTEM_PROMPT,
         max_tokens=MAX_TOKENS,
-        model=TAGGER_MODEL,
+        model=get_tagger_model(),
         return_stop_reason=True,
     )
 
@@ -141,7 +141,7 @@ Content:
             messages=messages,
             system=COMBINED_SYSTEM_PROMPT,
             max_tokens=RETRY_MAX_TOKENS,
-            model=TAGGER_MODEL,
+            model=get_tagger_model(),
             return_stop_reason=True,
         )
 

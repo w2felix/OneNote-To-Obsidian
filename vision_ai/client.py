@@ -1,7 +1,9 @@
 """Anthropic API client singleton with credential loading and retry logic."""
 
 import os
+import re
 import sys
+import threading
 import time
 import logging
 from pathlib import Path
@@ -14,34 +16,56 @@ logger = logging.getLogger(__name__)
 _client = None
 
 
-def _sibling_model_defaults():
-    """Read model ID defaults from the sibling 2nd-brain repo's vault_core.config,
-    if that repo is present, so both repos track the same model IDs instead of
-    drifting independently. Returns (sonnet, haiku) or (None, None).
+# Model selection: the VISION_MODEL / TAGGER_MODEL env vars win; otherwise the
+# newest Sonnet / Haiku the configured endpoint exposes is used; the literals
+# below apply only when the endpoint's model list can't be read.
+_FALLBACK_VISION_MODEL = "claude-sonnet-5"
+_FALLBACK_TAGGER_MODEL = "claude-haiku-4-5-20251001"
 
-    vault_core/__init__.py does absolute `from vault_core.config import ...`,
-    so `pipeline/` itself (not the 2nd-brain repo root) must be on sys.path
-    for `vault_core` to resolve as a top-level package.
-    """
-    sib_pipeline = Path(__file__).resolve().parents[2] / "2nd-brain" / "pipeline"
-    if not (sib_pipeline / "vault_core" / "config.py").exists():
-        return None, None
-    sib_str = str(sib_pipeline)
-    if sib_str not in sys.path:
-        sys.path.insert(0, sib_str)
-    try:
-        from vault_core import config as hub_config
-        return hub_config.MODEL_SONNET, hub_config.MODEL_HAIKU
-    except Exception:
-        return None, None
+# claude-sonnet-5-5, claude-sonnet-5, claude-haiku-4-5-20251001, ...
+_MODEL_ID_RE = re.compile(r"^claude-(sonnet|haiku)-(\d+)(?:-(\d{1,2}))?(?:-(\d{8}))?$")
+
+_resolved_models: dict = {}
+_resolve_lock = threading.Lock()
 
 
-_default_sonnet, _default_haiku = _sibling_model_defaults()
+def _latest_models(model_ids) -> dict:
+    """Pick the highest-versioned model ID per family ('sonnet', 'haiku')."""
+    best = {}
+    for model_id in model_ids:
+        m = _MODEL_ID_RE.match(model_id)
+        if not m:
+            continue
+        family, major, minor, date = m.groups()
+        key = (int(major), int(minor or 0), date or "")
+        if family not in best or key > best[family][0]:
+            best[family] = (key, model_id)
+    return {family: model_id for family, (_, model_id) in best.items()}
 
-# Model names - env vars take precedence, then the sibling repo's config,
-# then these literals for standalone use without 2nd-brain present.
-VISION_MODEL = os.environ.get("VISION_MODEL") or _default_sonnet or "claude-sonnet-5"
-TAGGER_MODEL = os.environ.get("TAGGER_MODEL") or _default_haiku or "claude-haiku-4-5-20251001"
+
+def _resolve_models() -> dict:
+    """Query the endpoint once per process for the newest Sonnet and Haiku."""
+    with _resolve_lock:
+        if _resolved_models:
+            return _resolved_models
+        found = {}
+        try:
+            client = get_client().with_options(timeout=10.0, max_retries=1)
+            found = _latest_models(m.id for m in client.models.list(limit=1000))
+        except Exception as e:
+            logger.warning("Could not list models from endpoint (%s); using fallback model IDs", e)
+        _resolved_models["vision"] = found.get("sonnet") or _FALLBACK_VISION_MODEL
+        _resolved_models["tagger"] = found.get("haiku") or _FALLBACK_TAGGER_MODEL
+        logger.info("Models: vision=%s tagger=%s", _resolved_models["vision"], _resolved_models["tagger"])
+        return _resolved_models
+
+
+def get_vision_model() -> str:
+    return os.environ.get("VISION_MODEL") or _resolve_models()["vision"]
+
+
+def get_tagger_model() -> str:
+    return os.environ.get("TAGGER_MODEL") or _resolve_models()["tagger"]
 
 RETRY_ATTEMPTS = 3
 RETRY_BASE_DELAY = 2.0
@@ -123,7 +147,7 @@ def api_call_with_retry(messages: list, system: str = "", max_tokens: int = 4096
                         model: Optional[str] = None,
                         return_stop_reason: bool = False) -> "str | tuple[str, str]":
     client = get_client()
-    model = model or VISION_MODEL
+    model = model or get_vision_model()
 
     kwargs = {"model": model, "max_tokens": max_tokens, "messages": messages}
     if system:
