@@ -51,7 +51,7 @@ Content:
         system=COMBINED_SYSTEM_PROMPT,
     )
 
-    raw_text = response.content[0].text
+    raw_text = ''.join(b.text for b in response.content if getattr(b, 'type', None) == 'text')
     stop_reason = response.stop_reason
     usage = response.usage
 

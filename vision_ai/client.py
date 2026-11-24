@@ -143,6 +143,14 @@ def get_client():
     return _client
 
 
+def extract_text(response) -> str:
+    """Join the text blocks of a response, skipping thinking/tool blocks."""
+    text = ''.join(b.text for b in response.content if getattr(b, 'type', None) == 'text')
+    if not text:
+        raise RuntimeError(f"No text block in API response (stop_reason={response.stop_reason})")
+    return text
+
+
 def api_call_with_retry(messages: list, system: str = "", max_tokens: int = 4096,
                         model: Optional[str] = None,
                         return_stop_reason: bool = False) -> "str | tuple[str, str]":
@@ -161,7 +169,7 @@ def api_call_with_retry(messages: list, system: str = "", max_tokens: int = 4096
             response = client.messages.create(**kwargs)
             if not response.content:
                 raise RuntimeError(f"Empty content in API response (stop_reason={response.stop_reason})")
-            text = response.content[0].text
+            text = extract_text(response)
             if return_stop_reason:
                 return text, response.stop_reason
             return text
